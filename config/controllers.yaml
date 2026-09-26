@@ -1,0 +1,18 @@
+# Joint names, namespace and update rate are filled by launch from swerve.yaml.
+controller_manager:
+  ros__parameters:
+    joint_state_broadcaster:
+      type: joint_state_broadcaster/JointStateBroadcaster
+    steering_controller:
+      type: forward_command_controller/ForwardCommandController
+    wheel_controller:
+      type: forward_command_controller/ForwardCommandController
+joint_state_broadcaster:
+  ros__parameters:
+    use_local_topics: false
+steering_controller:
+  ros__parameters:
+    interface_name: position
+wheel_controller:
+  ros__parameters:
+    interface_name: velocity

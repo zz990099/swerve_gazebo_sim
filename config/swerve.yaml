@@ -1,0 +1,24 @@
+# SI units. The launch file feeds this geometry to both Xacro and the controller.
+geometry:
+  wheelbase: 0.60
+  track_width: 0.50
+  wheel_radius: 0.10
+  wheel_width: 0.05
+  body_length: 0.80
+  body_width: 0.28
+  body_height: 0.16
+  ground_clearance: 0.14
+  body_mass: 20.0
+  wheel_mass: 0.6
+  steering_mass: 0.2
+control:
+  update_rate: 100.0
+  cmd_timeout: 0.5
+  feedback_timeout: 0.25
+  max_wheel_speed: 20.0      # rad/s
+  max_wheel_acceleration: 40.0  # rad/s^2; timeout stops immediately
+  max_steering_rate: 2.5     # rad/s
+  steering_limit: 1.5707963267948966
+  publish_odom_tf: true
+  pose_variance: 0.02       # Fixed nominal covariance, not an uncertainty estimator
+  twist_variance: 0.02

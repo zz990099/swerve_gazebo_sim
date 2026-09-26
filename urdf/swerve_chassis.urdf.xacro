@@ -1,0 +1,102 @@
+<?xml version="1.0"?>
+<!-- SPDX-License-Identifier: Apache-2.0 -->
+<robot xmlns:xacro="http://www.ros.org/wiki/xacro" name="swerve">
+  <xacro:arg name="wheelbase" default="0.60"/>
+  <xacro:arg name="track_width" default="0.50"/>
+  <xacro:arg name="wheel_radius" default="0.10"/>
+  <xacro:arg name="wheel_width" default="0.05"/>
+  <xacro:arg name="body_length" default="0.80"/>
+  <xacro:arg name="body_width" default="0.28"/>
+  <xacro:arg name="body_height" default="0.16"/>
+  <xacro:arg name="ground_clearance" default="0.14"/>
+  <xacro:arg name="body_mass" default="20.0"/>
+  <xacro:arg name="wheel_mass" default="0.6"/>
+  <xacro:arg name="steering_mass" default="0.2"/>
+  <xacro:arg name="steering_limit" default="1.5707963267948966"/>
+  <xacro:arg name="max_wheel_speed" default="20.0"/>
+  <xacro:arg name="max_steering_rate" default="2.5"/>
+  <xacro:arg name="prefix" default=""/>
+  <xacro:arg name="namespace" default=""/>
+  <xacro:arg name="controllers_file" default=""/>
+  <xacro:arg name="enable_control" default="true"/>
+  <xacro:arg name="publish_ground_truth" default="false"/>
+  <xacro:arg name="robot_name" default="swerve"/>
+  <xacro:property name="p" value="$(arg prefix)"/>
+  <xacro:property name="wb" value="$(arg wheelbase)"/>
+  <xacro:property name="tw" value="$(arg track_width)"/>
+  <xacro:property name="r" value="$(arg wheel_radius)"/>
+  <xacro:property name="ww" value="$(arg wheel_width)"/>
+  <xacro:property name="bl" value="$(arg body_length)"/>
+  <xacro:property name="bw" value="$(arg body_width)"/>
+  <xacro:property name="bh" value="$(arg body_height)"/>
+  <xacro:property name="base_z" value="${float('$(arg ground_clearance)') + bh / 2}"/>
+  <xacro:property name="bm" value="$(arg body_mass)"/>
+  <xacro:property name="wm" value="$(arg wheel_mass)"/>
+  <xacro:property name="sm" value="$(arg steering_mass)"/>
+  <material name="body_blue"><color rgba="0.12 0.35 0.65 1"/></material>
+  <material name="rubber"><color rgba="0.12 0.12 0.14 1"/></material>
+  <material name="steer_orange"><color rgba="1.0 0.45 0.08 1"/></material>
+  <link name="${p}base_footprint"/>
+  <joint name="${p}base_joint" type="fixed">
+    <parent link="${p}base_footprint"/><child link="${p}base_link"/>
+    <origin xyz="0 0 ${base_z}"/>
+  </joint>
+  <link name="${p}base_link">
+    <visual><geometry><box size="${bl} ${bw} ${bh}"/></geometry><material name="body_blue"/></visual>
+    <collision><geometry><box size="${bl} ${bw} ${bh}"/></geometry></collision>
+    <inertial>
+      <mass value="${bm}"/>
+      <inertia ixx="${bm*(bw*bw+bh*bh)/12}" iyy="${bm*(bl*bl+bh*bh)/12}"
+               izz="${bm*(bl*bl+bw*bw)/12}" ixy="0" ixz="0" iyz="0"/>
+    </inertial>
+  </link>
+  <xacro:macro name="module" params="name x y">
+    <joint name="${p}${name}_steering_joint" type="revolute">
+      <parent link="${p}base_link"/><child link="${p}${name}_steering_link"/>
+      <origin xyz="${x} ${y} ${r-base_z}"/>
+      <axis xyz="0 0 1"/>
+      <limit lower="${-float('$(arg steering_limit)')}" upper="$(arg steering_limit)"
+             effort="30" velocity="$(arg max_steering_rate)"/>
+      <dynamics damping="0.1" friction="0.0"/>
+    </joint>
+    <link name="${p}${name}_steering_link">
+      <visual><origin xyz="0 0 ${r*0.65}"/><geometry><box size="0.04 0.04 0.04"/></geometry><material name="steer_orange"/></visual>
+      <inertial><mass value="${sm}"/>
+        <inertia ixx="${sm*0.04*0.04/6}" iyy="${sm*0.04*0.04/6}" izz="${sm*0.04*0.04/6}" ixy="0" ixz="0" iyz="0"/>
+      </inertial>
+    </link>
+    <joint name="${p}${name}_wheel_joint" type="continuous">
+      <parent link="${p}${name}_steering_link"/><child link="${p}${name}_wheel_link"/>
+      <axis xyz="0 1 0"/>
+      <limit effort="20" velocity="$(arg max_wheel_speed)"/>
+      <dynamics damping="0.01" friction="0.0"/>
+    </joint>
+    <link name="${p}${name}_wheel_link">
+      <visual><origin rpy="${pi/2} 0 0"/><geometry><cylinder radius="${r}" length="${ww}"/></geometry><material name="rubber"/></visual>
+      <collision><origin rpy="${pi/2} 0 0"/><geometry><cylinder radius="${r}" length="${ww}"/></geometry></collision>
+      <inertial><mass value="${wm}"/>
+        <inertia ixx="${wm*(3*r*r+ww*ww)/12}" iyy="${wm*r*r/2}"
+                 izz="${wm*(3*r*r+ww*ww)/12}" ixy="0" ixz="0" iyz="0"/>
+      </inertial>
+    </link>
+    <gazebo reference="${p}${name}_wheel_link"><mu1>1.0</mu1><mu2>1.0</mu2></gazebo>
+  </xacro:macro>
+  <xacro:module name="fl" x="${wb/2}" y="${tw/2}"/>
+  <xacro:module name="fr" x="${wb/2}" y="${-tw/2}"/>
+  <xacro:module name="rl" x="${-wb/2}" y="${tw/2}"/>
+  <xacro:module name="rr" x="${-wb/2}" y="${-tw/2}"/>
+  <xacro:if value="$(arg enable_control)">
+    <xacro:include filename="$(find swerve_gazebo_sim)/urdf/gazebo_control.urdf.xacro"/>
+    <xacro:swerve_control prefix="${p}" namespace="$(arg namespace)" controllers_file="$(arg controllers_file)"
+                          wheel_speed="$(arg max_wheel_speed)" steering_limit="$(arg steering_limit)"/>
+  </xacro:if>
+  <xacro:if value="$(arg publish_ground_truth)">
+    <gazebo>
+      <plugin filename="ignition-gazebo-odometry-publisher-system" name="ignition::gazebo::systems::OdometryPublisher">
+        <odom_frame>${p}world</odom_frame><robot_base_frame>${p}base_footprint</robot_base_frame>
+        <odom_publish_frequency>50</odom_publish_frequency><dimensions>2</dimensions>
+        <odom_topic>/model/$(arg robot_name)/odometry</odom_topic>
+      </plugin>
+    </gazebo>
+  </xacro:if>
+</robot>
