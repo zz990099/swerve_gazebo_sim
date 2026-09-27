@@ -1,0 +1,27 @@
+<?xml version="1.0"?>
+<!-- SPDX-License-Identifier: Apache-2.0 -->
+<robot xmlns:xacro="http://www.ros.org/wiki/xacro" name="swerve_drive">
+  <!-- Public simulation model: chassis geometry plus Gazebo plugins. -->
+  <xacro:arg name="config_file" default="$(find swerve_gazebo_sim)/config/swerve.yaml"/>
+  <xacro:arg name="prefix" default=""/>
+  <xacro:arg name="namespace" default=""/>
+  <xacro:arg name="controllers_file" default=""/>
+  <xacro:arg name="publish_ground_truth" default="false"/>
+  <xacro:arg name="robot_name" default="swerve"/>
+  <xacro:property name="settings" value="${xacro.load_yaml('$(arg config_file)')}"/>
+
+  <xacro:include filename="$(find swerve_gazebo_sim)/urdf/chassis.urdf.xacro"/>
+  <xacro:include filename="$(find swerve_gazebo_sim)/urdf/plugins.urdf.xacro"/>
+
+  <xacro:swerve_chassis prefix="$(arg prefix)"
+                        geometry="${settings['geometry']}"
+                        control="${settings['control']}"/>
+
+  <xacro:swerve_plugins
+    prefix="$(arg prefix)"
+    namespace="$(arg namespace)"
+    controllers_file="$(arg controllers_file)"
+    control="${settings['control']}"
+    publish_ground_truth="$(arg publish_ground_truth)"
+    robot_name="$(arg robot_name)"/>
+</robot>

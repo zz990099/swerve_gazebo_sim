@@ -53,3 +53,21 @@ supports functional swerve simulation, not a claim of real-world dynamic accurac
 GUI rendering, real hardware, sloped/rough terrain and other ROS/Gazebo versions
 were not validated. The executable tests in `test/` are provided for reproducing
 the checks after moving the package to another workspace.
+
+## URDF split validation (2026-09-27)
+
+After splitting the model into `chassis.urdf.xacro`, `plugins.urdf.xacro` and
+`swerve_drive.urdf.xacro`, an isolated package build passed. The three pytest
+suites passed all 32 cases; `colcon test-result` reported 35 tests, including
+three CTest suite wrappers, with no errors or failures. The additional model
+checks render the chassis alone, the complete model and a custom YAML geometry.
+
+The two-robot physical test passed all seven motions, stopped on command
+timeout and kept the uncommanded robot stationary. A single-robot test also
+passed all those checks in a separate container. Two earlier single-robot runs
+exceeded the smoke test's lateral encoder-odometry error threshold during one
+of the sideways motions, although their measured steady velocities met the
+command targets. A comparison of expanded URDFs found the same model and
+plugin fields before and after the split; the root name and XML element order
+changed. The intermittent lateral odometry error remains a simulation test
+limitation and has not been attributed to the URDF split.

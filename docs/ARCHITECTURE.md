@@ -49,6 +49,10 @@ angle. The eight planar components form an overdetermined linear system for the
 three body velocities. Its least-squares solution assumes no lateral slip at each
 wheel. Gazebo ground truth is never used in that estimator or in the controller.
 
+`swerve_drive.urdf.xacro` assembles `chassis.urdf.xacro` and
+`plugins.urdf.xacro`. The chassis file contains only the physical link and joint
+tree; all Gazebo tags live in the plugins file. The public model takes a single
+configuration file argument, along with the names and paths needed to spawn it.
 The single YAML configuration supplies dimensions to both Xacro and kinematics.
 Model link names, joint names and odometry frames share one prefix. ROS topics and
 controller managers use a ROS namespace. Global TF topics combine frames from all

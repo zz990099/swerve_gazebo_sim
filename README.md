@@ -64,6 +64,15 @@ All fields are startup parameters; restart after changing geometry. Launch valid
 positive dimensions and wheel clearance. The initial default is a 0.60 m wheelbase,
 0.50 m track, 0.10 m wheel radius and 0.80 × 0.28 × 0.16 m body.
 
+The URDF has three focused files:
+
+- `urdf/chassis.urdf.xacro` defines the chassis links, joints, limits and inertias. It contains no Gazebo plugins or contact settings.
+- `urdf/plugins.urdf.xacro` defines Gazebo wheel contact, `ros2_control` and optional ground-truth plugins.
+- `urdf/swerve_drive.urdf.xacro` is the complete model used by launch and other consumers. It loads the same `swerve.yaml` file, so dimensions and limits do not need separate Xacro arguments.
+
+The complete model accepts `config_file`, `prefix`, `namespace`, `controllers_file`,
+`publish_ground_truth` and `robot_name`. The launch file supplies these values.
+
 ```bash
 ros2 launch swerve_gazebo_sim demo.launch.py namespace:=robot1 robot_name:=robot1
 # In a second sourced terminal, reuse the running world and its clock:

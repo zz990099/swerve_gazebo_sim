@@ -1,4 +1,4 @@
-# SI units. The launch file feeds this geometry to both Xacro and the controller.
+# SI units. Xacro and the controller both load this configuration.
 geometry:
   wheelbase: 0.60
   track_width: 0.50

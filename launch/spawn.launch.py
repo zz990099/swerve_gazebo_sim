@@ -30,12 +30,10 @@ def setup(context):
         yaml.safe_dump(params, stream)
         controllers_file = stream.name
     try:
-        mappings = {key: str(value) for key, value in cfg['geometry'].items()}
-        mappings.update({key: str(cfg['control'][key]) for key in
-                         ('steering_limit', 'max_wheel_speed', 'max_steering_rate')})
-        mappings.update(prefix=prefix, namespace=namespace, controllers_file=controllers_file,
-                        robot_name=arg('robot_name'), publish_ground_truth=str(truth).lower())
-        description = xacro.process_file(os.path.join(share, 'urdf', 'swerve_chassis.urdf.xacro'),
+        mappings = dict(config_file=arg('config'), prefix=prefix, namespace=namespace,
+                        controllers_file=controllers_file, robot_name=arg('robot_name'),
+                        publish_ground_truth=str(truth).lower())
+        description = xacro.process_file(os.path.join(share, 'urdf', 'swerve_drive.urdf.xacro'),
                                          mappings=mappings).toxml()
     except Exception:
         os.unlink(controllers_file)
