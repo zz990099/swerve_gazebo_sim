@@ -37,11 +37,18 @@ For Harmonic:
 ros2 launch swerve_gazebo_sim demo.launch.py gazebo_version:=gz
 ```
 
-Headless simulation: add `headless:=true`. The supplied world requires no downloads.
-When `world` is empty, the demo selects `empty_ign.sdf` or `empty_gz.sdf` for the
-requested family. For an existing world with the Physics and UserCommands systems
-and one `/clock` bridge, use `spawn.launch.py world_name:=YOUR_WORLD` and pass the
-same `gazebo_version` used to start that world.
+Headless simulation: add `headless:=true`. Use this mode for automated tests and
+when the container has no GPU device. A graphical Gazebo client without hardware
+OpenGL can fall back to CPU software rendering and consume several CPU cores. Pass
+the host's GPU/render device into the container when a GUI is required.
+
+The bundled worlds run physics at 200 Hz with a target real-time factor of 1.0.
+This provides two physics steps per 100 Hz controller update and avoids publishing
+simulation clock updates at the previous 1000 Hz rate. The supplied world requires
+no downloads. When `world` is empty, the demo selects `empty_ign.sdf` or
+`empty_gz.sdf` for the requested family. For an existing world with the Physics and
+UserCommands systems and one `/clock` bridge, use `spawn.launch.py
+world_name:=YOUR_WORLD` and pass the same `gazebo_version` used to start that world.
 
 ## Drive the chassis
 

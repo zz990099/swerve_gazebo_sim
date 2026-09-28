@@ -154,6 +154,10 @@ def test_gazebo_variants_reference_version_specific_files():
 
     ignition_world = ET.parse(ROOT / "worlds" / ignition["world"]).getroot()
     harmonic_world = ET.parse(ROOT / "worlds" / harmonic["world"]).getroot()
+    for world in (ignition_world, harmonic_world):
+        physics = world.find(".//physics")
+        assert float(physics.find("max_step_size").text) == pytest.approx(0.005)
+        assert float(physics.find("real_time_factor").text) == pytest.approx(1.0)
     ignition_plugins = [
         plugin.get("filename") for plugin in ignition_world.findall(".//plugin")
     ]

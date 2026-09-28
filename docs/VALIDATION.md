@@ -121,3 +121,17 @@ physical test, a `(0.25, 0.0, 0.2)` differential command produced approximately
 `(0.254, 0.000, 0.203)`, with 0.036 m planar odometry error and 0.024 rad yaw
 error over the segment. The same run passed forward, reverse, crab in both
 directions, spin in both directions, timeout stopping and steering return-to-home.
+
+## CPU usage validation (2026-09-28)
+
+The original bundled world used a 0.001 s step, producing 1000 physics and `/clock`
+updates per simulated second. In an isolated headless Fortress run, Gazebo used
+about 48% of one CPU core, the Python controller 46% and the clock bridge 10%.
+Changing the step to 0.005 s reduced those measurements to approximately 19%, 23%
+and 4%, while the measured real-time factor remained between 0.97 and 0.99.
+
+The 200 Hz world passed the complete physical smoke test: forward, reverse, both
+crab directions, both spin directions, double-Ackermann differential turning,
+timeout stopping and steering return-to-home. A container without a GPU render
+device still uses CPU software rendering when the GUI is enabled; use
+`headless:=true` or provide hardware OpenGL access to avoid that separate cost.

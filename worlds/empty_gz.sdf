@@ -2,7 +2,8 @@
 <sdf version="1.8">
   <world name="swerve_world">
     <physics name="default" type="ignored">
-      <max_step_size>0.001</max_step_size>
+      <!-- 200 Hz physics provides two simulation steps per 100 Hz control tick. -->
+      <max_step_size>0.005</max_step_size>
       <real_time_factor>1.0</real_time_factor>
     </physics>
 
