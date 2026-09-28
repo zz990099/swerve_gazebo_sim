@@ -135,10 +135,16 @@ class SwerveController(Node):
             steering_targets = [0.0] * 4
 
         self.requested_mode = mode
-        self._move_steering_toward(steering_targets, dt)
+        entering_mode = mode is not None and mode is not self.active_mode
+        if entering_mode and mode is DriveMode.DIFFERENTIAL:
+            commanded_steering_targets = [0.0] * 4
+        else:
+            commanded_steering_targets = steering_targets
+
+        self._move_steering_toward(commanded_steering_targets, dt)
         self.steering_is_aligned = feedback_is_current and all(
             abs(target - measured) <= self.configuration["steering_alignment_tolerance"]
-            for target, measured in zip(steering_targets, self.angles)
+            for target, measured in zip(commanded_steering_targets, self.angles)
         )
 
         if mode is None:
@@ -151,8 +157,8 @@ class SwerveController(Node):
                 self.active_mode = mode
                 self._move_wheels_toward(wheel_targets, dt)
         elif mode is DriveMode.DIFFERENTIAL:
-            # Differential mode only gates entry. Steering remains commanded home,
-            # but feedback error does not interrupt an active maneuver.
+            # Differential mode only gates entry. Ackermann steering continues
+            # tracking its targets without interrupting an active maneuver.
             self._move_wheels_toward(wheel_targets, dt)
         elif not self.steering_is_aligned:
             self.sent_speeds = [0.0] * 4
@@ -190,10 +196,7 @@ class SwerveController(Node):
             ]
             speeds = [msg.velocity[index] for index in wheel_indices]
             angles = [msg.position[index] for index in steering_indices]
-            if self.active_mode is DriveMode.DIFFERENTIAL:
-                twist = self.kinematics.forward_differential(speeds)
-            else:
-                twist = self.kinematics.forward(speeds, angles)
+            twist = self.kinematics.forward(speeds, angles)
         except (ValueError, IndexError):
             return
         now = self.get_clock().now().nanoseconds * 1e-9

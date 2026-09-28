@@ -69,7 +69,7 @@ def test_drive_mode_selection(twist, expected_mode):
     assert select_drive_mode(*twist) is expected_mode
 
 
-def test_differential_mode_keeps_steering_at_zero(model):
+def test_differential_mode_uses_double_ackermann_steering(model):
     mode, wheel_speeds, steering_targets = model.commands_for_motion(
         0.4,
         0.0,
@@ -78,8 +78,22 @@ def test_differential_mode_keeps_steering_at_zero(model):
     )
 
     assert mode is DriveMode.DIFFERENTIAL
-    assert steering_targets == [0.0] * 4
-    assert wheel_speeds == pytest.approx([3.5, 4.5, 3.5, 4.5])
+    assert steering_targets == pytest.approx(
+        [
+            math.atan2(0.06, 0.35),
+            math.atan2(0.06, 0.45),
+            math.atan2(-0.06, 0.35),
+            math.atan2(-0.06, 0.45),
+        ]
+    )
+    assert wheel_speeds == pytest.approx(
+        [
+            math.hypot(0.35, 0.06) / 0.1,
+            math.hypot(0.45, 0.06) / 0.1,
+            math.hypot(0.35, 0.06) / 0.1,
+            math.hypot(0.45, 0.06) / 0.1,
+        ]
+    )
 
 
 def test_stop_mode_returns_zero_commands(model):
@@ -117,7 +131,13 @@ def test_encoder_yaw_estimate(model):
 
 
 def test_differential_encoder_estimate(model):
-    assert model.forward_differential([2.5, 3.5, 2.5, 3.5]) == pytest.approx(
+    _, wheel_speeds, steering_targets = model.commands_for_motion(
+        0.3,
+        0.0,
+        0.2,
+        [0.0] * 4,
+    )
+    assert model.forward(wheel_speeds, steering_targets) == pytest.approx(
         (0.3, 0.0, 0.2)
     )
 

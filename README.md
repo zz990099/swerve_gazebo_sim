@@ -117,7 +117,7 @@ each namespace lives in a temporary file and is removed when launch shuts down.
 The controller selects an explicit mode from each body command:
 
 - Differential mode: `vy = 0`, with `vx` and optional `wz`. All steering joints
-  return to zero before the left and right drive speeds are applied.
+  return to zero before double-Ackermann steering and drive commands are applied.
 - Spin mode: only `wz` is nonzero. The four modules form the spin pattern.
 - Crab mode: translation includes `vy` and `wz = 0`. All modules are parallel.
 
@@ -127,25 +127,22 @@ and returns steering to zero because it does not belong to any supported mode.
 Mode entry uses a steering interlock. Wheel commands remain exactly zero until
 every measured steering angle is within `steering_alignment_tolerance` of its
 target. The default tolerance is 0.05 rad. Differential mode does not reapply the
-interlock after entry, so steering feedback variation cannot interrupt an active
-differential maneuver. Spin and crab continue checking their steering targets.
-Wheel acceleration limiting begins after entry. Feedback loss stops wheel commands.
-These measures reduce transients but do not provide real hardware safety.
+interlock after entry: its four steering targets and wheel speeds respond together,
+so steering feedback variation cannot interrupt an active maneuver. Spin and crab
+continue checking their steering targets. Wheel acceleration limiting begins after
+entry. Feedback loss stops wheel commands. These measures reduce transients but do
+not provide real hardware safety.
 
-In differential mode, a wheel at lateral position `y_i` receives longitudinal
-speed `(vx - wz*y_i) / wheel_radius`. Spin and crab use the full four-module
-kinematics for their fixed spin pattern and parallel steering direction. Wheel
-contact uses higher rolling friction than lateral friction so differential yaw can
-produce the required tire slip in Gazebo.
+In differential mode, a module at `(x_i, y_i)` targets velocity
+`(vx - wz*y_i, wz*x_i)`. This produces opposite front/rear steering angles and
+individual wheel speeds for double-Ackermann motion. Spin and crab use the same
+four-module kinematics for their fixed spin pattern and parallel steering direction.
 
-Differential odometry uses measured left/right wheel speeds and track width. Spin
-and crab odometry use measured wheel velocities and steering positions with a
-least-squares rigid-body fit. Both feed SE(2) integration and start at zero regardless
-of spawn pose. Wheel encoders cannot observe lateral tire slip during differential
-yaw, so its planar pose estimate has more drift. Covariance is a configurable nominal
-diagonal, not an estimated uncertainty. Simulation resets clear command/odometry
-state; feedback gaps are not extrapolated. Reinitialize external consumers after a
-world reset.
+Odometry uses measured wheel velocities and steering positions with a least-squares
+rigid-body fit, then feeds SE(2) integration. It starts at zero regardless of spawn
+pose. Covariance is a configurable nominal diagonal, not an estimated uncertainty.
+Simulation resets clear command/odometry state; feedback gaps are not extrapolated.
+Reinitialize external consumers after a world reset.
 
 The Gazebo position/velocity interfaces are idealized actuators. The model includes
 mass, inertia, gravity and wheel contact, but no suspension, motor electrical model

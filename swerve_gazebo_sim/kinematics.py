@@ -40,7 +40,6 @@ class SwerveKinematics:
             raise ValueError("This release supports steering limits of +/- pi/2")
         self.radius = wheel_radius
         self.limit = steering_limit
-        self.track_width = track_width
         self.positions = (
             (wheelbase / 2, track_width / 2),
             (wheelbase / 2, -track_width / 2),
@@ -60,8 +59,13 @@ class SwerveKinematics:
             return mode, [0.0] * 4, [0.0] * 4
 
         if mode is DriveMode.DIFFERENTIAL:
-            wheel_speeds = [(vx - wz * y) / self.radius for _, y in self.positions]
-            return mode, wheel_speeds, [0.0] * 4
+            wheel_speeds, steering_targets = self.inverse(
+                vx,
+                0.0,
+                wz,
+                current_angles,
+            )
+            return mode, wheel_speeds, steering_targets
 
         if mode is DriveMode.CRAB:
             wz = 0.0
@@ -117,20 +121,6 @@ class SwerveKinematics:
                 )
             )
         return tuple(float(v) for v in self._inverse @ np.array(velocities))
-
-    def forward_differential(self, wheel_speeds):
-        """Estimate body velocity from zero-steering left/right wheel speeds."""
-        if len(wheel_speeds) != 4 or not all(
-            math.isfinite(value) for value in wheel_speeds
-        ):
-            raise ValueError("Expected four finite wheel speeds")
-        left_speed = self.radius * (wheel_speeds[0] + wheel_speeds[2]) / 2
-        right_speed = self.radius * (wheel_speeds[1] + wheel_speeds[3]) / 2
-        return (
-            (left_speed + right_speed) / 2,
-            0.0,
-            (right_speed - left_speed) / self.track_width,
-        )
 
 
 def integrate_pose(pose, twist, dt):

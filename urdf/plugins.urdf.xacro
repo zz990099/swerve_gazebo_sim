@@ -20,11 +20,9 @@
     />
 
     <xacro:macro name="wheel_contact" params="corner">
-      <!-- High rolling traction with controlled lateral slip for differential yaw. -->
       <gazebo reference="${prefix}${corner}_wheel_link">
         <mu1>1.0</mu1>
-        <mu2>0.2</mu2>
-        <fdir1>1 0 0</fdir1>
+        <mu2>1.0</mu2>
       </gazebo>
     </xacro:macro>
 

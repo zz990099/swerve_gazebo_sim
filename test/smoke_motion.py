@@ -185,10 +185,7 @@ def main():
                 abs(a - b) < limit
                 for a, b, limit in zip(measured, target, (0.08, 0.08, 0.12))
             ), name
-            position_limit = 0.4 if name == "differential_turn" else 0.25
-            assert position_error < position_limit and yaw_error < 0.2, (
-                name + " odometry"
-            )
+            assert position_error < 0.25 and yaw_error < 0.2, name + " odometry"
         stopped = node.run_for(2, None)
         print(f"timeout_stop: measured={stopped}", flush=True)
         assert all(abs(v) < 0.03 for v in stopped), "Watchdog failed to stop chassis"

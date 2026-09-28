@@ -102,8 +102,8 @@ def test_public_model_combines_chassis_and_plugins(
     assert len(wheel_contacts) == 4
     for contact in wheel_contacts:
         assert contact.find("mu1").text == "1.0"
-        assert contact.find("mu2").text == "0.2"
-        assert contact.find("fdir1").text == "1 0 0"
+        assert contact.find("mu2").text == "1.0"
+        assert contact.find("fdir1") is None
     assert len(root.findall(".//gazebo/plugin")) == 1
     assert root.find(".//gazebo/plugin/parameters").text == "/tmp/controllers.yaml"
     assert root.find(".//gazebo/plugin/ros/namespace").text == "/robot1"

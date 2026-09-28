@@ -132,20 +132,29 @@ def test_differential_waits_until_steering_returns_home(node):
 
     wheel_speeds = settle_steering(node)
     assert node.sent_angles == pytest.approx([0.0] * 4)
-    assert wheel_speeds == pytest.approx([2.5, 3.5, 2.5, 3.5])
+    expected_speeds, _ = node.kinematics.inverse(0.3, 0.0, 0.2, [0.0] * 4)
+    assert wheel_speeds == pytest.approx(expected_speeds)
 
 
 def test_active_differential_mode_does_not_reapply_steering_interlock(node):
     feedback(node)
     command(node, x=0.3, yaw=0.2)
-    assert tick(node, period=0.1) == pytest.approx([2.5, 3.5, 2.5, 3.5])
+    expected_speeds, expected_angles = node.kinematics.inverse(
+        0.3,
+        0.0,
+        0.2,
+        [0.0] * 4,
+    )
+    assert tick(node, period=0.1) == pytest.approx(expected_speeds)
     assert node.active_mode is DriveMode.DIFFERENTIAL
+    assert node.sent_angles == pytest.approx([0.0] * 4)
 
-    feedback(node, steering_angles=[0.2] * 4)
+    feedback(node)
     wheel_speeds = tick(node, period=0.1)
 
     assert not node.steering_is_aligned
-    assert wheel_speeds == pytest.approx([2.5, 3.5, 2.5, 3.5])
+    assert node.sent_angles == pytest.approx(expected_angles)
+    assert wheel_speeds == pytest.approx(expected_speeds)
 
 
 def test_direct_crab_to_spin_switch_stops_drive_until_realigned(node):
@@ -208,8 +217,17 @@ def test_encoder_rotation_is_published(node):
 
 
 def test_differential_encoder_velocity_is_published(node):
-    node.active_mode = DriveMode.DIFFERENTIAL
-    feedback(node, wheel_speeds=[2.5, 3.5, 2.5, 3.5])
+    wheel_speeds, steering_angles = node.kinematics.inverse(
+        0.3,
+        0.0,
+        0.2,
+        [0.0] * 4,
+    )
+    feedback(
+        node,
+        steering_angles=steering_angles,
+        wheel_speeds=wheel_speeds,
+    )
 
     result = node.odom_pub.messages[-1]
     assert result.twist.twist.linear.x == pytest.approx(0.3)
