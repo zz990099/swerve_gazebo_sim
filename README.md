@@ -8,9 +8,17 @@ motion in any planar direction, including simultaneous translation and rotation.
 
 ## Supported environment
 
-The initial target is Ubuntu 22.04, ROS 2 Humble and Gazebo Fortress (Gazebo Sim 6),
-with `gz_ros2_control`, `ros_gz_sim` and `ros_gz_bridge`. This is Gazebo Sim, not
-Gazebo Classic. Other ROS / Gazebo combinations have not been validated.
+The launch interface has two explicit Gazebo families:
+
+- `gazebo_version:=ign` selects Gazebo Fortress (Gazebo Sim 6),
+  `ignition.msgs.*` bridge types and `ignition-gazebo-*` system plugins. This is
+  the default and is validated with Ubuntu 22.04 and ROS 2 Humble.
+- `gazebo_version:=gz` selects Gazebo Harmonic (Gazebo Sim 8), `gz.msgs.*`
+  bridge types and `gz-sim-*` system plugins. It is intended for a matching
+  ROS 2 Jazzy / Harmonic installation.
+
+Both variants use `gz_ros2_control`, `ros_gz_sim` and `ros_gz_bridge`. Gazebo
+Classic is not supported.
 
 Use a ROS installation with the matching Gazebo integration packages available.
 Copy this directory alone into an empty workspace's `src/`, then:
@@ -23,9 +31,17 @@ source install/setup.bash
 ros2 launch swerve_gazebo_sim demo.launch.py
 ```
 
+For Harmonic:
+
+```bash
+ros2 launch swerve_gazebo_sim demo.launch.py gazebo_version:=gz
+```
+
 Headless simulation: add `headless:=true`. The supplied world requires no downloads.
-For an existing Fortress world with the Physics and UserCommands systems and one
-`/clock` bridge, use `spawn.launch.py world_name:=YOUR_WORLD`.
+When `world` is empty, the demo selects `empty_ign.sdf` or `empty_gz.sdf` for the
+requested family. For an existing world with the Physics and UserCommands systems
+and one `/clock` bridge, use `spawn.launch.py world_name:=YOUR_WORLD` and pass the
+same `gazebo_version` used to start that world.
 
 ## Drive the chassis
 
@@ -70,8 +86,11 @@ The URDF has three focused files:
 - `urdf/plugins.urdf.xacro` defines Gazebo wheel contact, `ros2_control` and optional ground-truth plugins.
 - `urdf/swerve_drive.urdf.xacro` is the complete model used by launch and other consumers. It loads the same `swerve.yaml` file, so dimensions and limits do not need separate Xacro arguments.
 
-The complete model accepts `config_file`, `prefix`, `namespace`, `controllers_file`,
-`publish_ground_truth` and `robot_name`. The launch file supplies these values.
+The complete model accepts `config_file`, `gazebo_version`, `prefix`, `namespace`,
+`controllers_file` and `publish_ground_truth`. The launch file supplies these
+values. Bridge definitions are kept in `config/clock_bridge_*.yaml` and
+`config/robot_bridge_*.yaml`; launch files only select the configuration that
+matches the requested Gazebo family.
 
 ```bash
 ros2 launch swerve_gazebo_sim demo.launch.py namespace:=robot1 robot_name:=robot1
@@ -85,8 +104,9 @@ from the namespace; override it explicitly if needed. Use a unique `robot_name`,
 namespace and prefix for each robot. The clock bridge belongs to the world and
 is started once by `demo.launch.py`, never by `spawn.launch.py`.
 
-Launch also accepts `x`, `y`, `z`, `yaw`, `world_name` and `publish_ground_truth`.
-`demo.launch.py` additionally accepts `headless` and an absolute `world` SDF path.
+Launch also accepts `gazebo_version`, `x`, `y`, `z`, `yaw`, `world_name` and
+`publish_ground_truth`. `demo.launch.py` additionally accepts `headless` and an
+absolute `world` SDF path.
 Spawning and controller activation are sequenced by process completion, with a
 60-second controller-manager timeout. The controller configuration generated for
 each namespace lives in a temporary file and is removed when launch shuts down.

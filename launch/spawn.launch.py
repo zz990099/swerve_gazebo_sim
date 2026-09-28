@@ -1,92 +1,304 @@
 # SPDX-License-Identifier: Apache-2.0
+"""Spawn one swerve chassis into a running Gazebo world."""
+
 import os
 import tempfile
 
 import xacro
 import yaml
 from ament_index_python.packages import get_package_share_directory
-from launch import LaunchDescription
-from launch.actions import DeclareLaunchArgument, EmitEvent, OpaqueFunction, RegisterEventHandler
+from launch.actions import (
+    DeclareLaunchArgument,
+    EmitEvent,
+    OpaqueFunction,
+    RegisterEventHandler,
+)
+from launch.conditions import IfCondition
 from launch.event_handlers import OnProcessExit, OnShutdown
 from launch.events import Shutdown
 from launch.substitutions import LaunchConfiguration
 from launch_ros.actions import Node
 
-from swerve_gazebo_sim.bringup import controller_config, load_config, names
+from launch import LaunchDescription
+from swerve_gazebo_sim.bringup import (
+    controller_config,
+    gazebo_variant,
+    load_config,
+    names,
+)
+
+PACKAGE_NAME = "swerve_gazebo_sim"
 
 
-def setup(context):
-    def arg(name):
-        return LaunchConfiguration(name).perform(context)
+def launch_setup(context):
+    package_share = get_package_share_directory(PACKAGE_NAME)
 
-    share = get_package_share_directory('swerve_gazebo_sim')
-    cfg = load_config(arg('config'))
-    namespace, prefix = names(arg('namespace'), arg('robot_name'), arg('prefix'))
-    truth = arg('publish_ground_truth').lower() == 'true'
-    if arg('use_sim_time').lower() != 'true':
-        raise ValueError('Gazebo simulation requires use_sim_time:=true')
-    params = controller_config(os.path.join(share, 'config', 'controllers.yaml'), cfg, namespace, prefix)
-    with tempfile.NamedTemporaryFile(mode='w', prefix='swerve_controllers_', suffix='.yaml', delete=False) as stream:
-        yaml.safe_dump(params, stream)
-        controllers_file = stream.name
+    config_file = LaunchConfiguration("config").perform(context)
+    namespace, prefix = names(
+        LaunchConfiguration("namespace").perform(context),
+        LaunchConfiguration("robot_name").perform(context),
+        LaunchConfiguration("prefix").perform(context),
+    )
+    gazebo_version = LaunchConfiguration("gazebo_version").perform(context)
+    version = gazebo_variant(gazebo_version)
+    configuration = load_config(config_file)
+
+    controller_template = os.path.join(
+        package_share,
+        "config",
+        "controllers.yaml",
+    )
+    controller_parameters = controller_config(
+        controller_template,
+        configuration,
+        namespace,
+        prefix,
+    )
+
+    with tempfile.NamedTemporaryFile(
+        mode="w",
+        prefix="swerve_controllers_",
+        suffix=".yaml",
+        delete=False,
+    ) as controller_stream:
+        yaml.safe_dump(controller_parameters, controller_stream)
+        controllers_file = controller_stream.name
+
+    model_file = os.path.join(
+        package_share,
+        "urdf",
+        "swerve_drive.urdf.xacro",
+    )
+    xacro_mappings = {
+        "gazebo_version": gazebo_version,
+        "config_file": config_file,
+        "prefix": prefix,
+        "namespace": namespace,
+        "controllers_file": controllers_file,
+        "publish_ground_truth": LaunchConfiguration("publish_ground_truth").perform(
+            context
+        ),
+    }
     try:
-        mappings = dict(config_file=arg('config'), prefix=prefix, namespace=namespace,
-                        controllers_file=controllers_file, robot_name=arg('robot_name'),
-                        publish_ground_truth=str(truth).lower())
-        description = xacro.process_file(os.path.join(share, 'urdf', 'swerve_drive.urdf.xacro'),
-                                         mappings=mappings).toxml()
+        robot_description = xacro.process_file(
+            model_file,
+            mappings=xacro_mappings,
+        ).toxml()
     except Exception:
         os.unlink(controllers_file)
         raise
 
-    def cleanup(event, launch_context):
+    def remove_temporary_controller_file(event, launch_context):
+        del event, launch_context
         if os.path.exists(controllers_file):
             os.unlink(controllers_file)
         return []
 
-    state_publisher = Node(package='robot_state_publisher', executable='robot_state_publisher',
-                           namespace=namespace, name='robot_state_publisher', output='screen',
-                           parameters=[{'robot_description': description, 'use_sim_time': True}])
-    spawn = Node(package='ros_gz_sim', executable='create', namespace=namespace, output='screen',
-                 arguments=['-world', arg('world_name'), '-name', arg('robot_name'),
-                            '-topic', f'{namespace}/robot_description', '-allow_renaming', 'false',
-                            '-x', arg('x'), '-y', arg('y'), '-z', arg('z'), '-Y', arg('yaw')])
-    spawner = Node(package='controller_manager', executable='spawner', namespace=namespace,
-                   output='screen', arguments=['joint_state_broadcaster', 'steering_controller',
-                                                'wheel_controller', '--controller-manager',
-                                                f'{namespace}/controller_manager',
-                                                '--controller-manager-timeout', '60',
-                                                '--param-file', controllers_file])
-    controller_params = dict(cfg['control'])
-    controller_params.update({key: cfg['geometry'][key] for key in ('wheelbase', 'track_width', 'wheel_radius')})
-    controller_params.update(use_sim_time=True, joint_prefix=prefix, frame_prefix=prefix)
-    controller = Node(package='swerve_gazebo_sim', executable='swerve_controller',
-                      namespace=namespace, output='screen', parameters=[controller_params])
+    robot_state_publisher = Node(
+        package="robot_state_publisher",
+        executable="robot_state_publisher",
+        name="robot_state_publisher",
+        namespace=namespace,
+        output="screen",
+        parameters=[
+            {
+                "robot_description": robot_description,
+                "use_sim_time": True,
+            }
+        ],
+    )
 
-    def after_spawn(event, launch_context):
-        return [spawner] if event.returncode == 0 else [EmitEvent(event=Shutdown(reason='Model spawn failed'))]
+    spawn_model = Node(
+        package="ros_gz_sim",
+        executable="create",
+        namespace=namespace,
+        output="screen",
+        arguments=[
+            "-world",
+            LaunchConfiguration("world_name").perform(context),
+            "-name",
+            LaunchConfiguration("robot_name").perform(context),
+            "-topic",
+            f"{namespace}/robot_description",
+            "-allow_renaming",
+            "false",
+            "-x",
+            LaunchConfiguration("x").perform(context),
+            "-y",
+            LaunchConfiguration("y").perform(context),
+            "-z",
+            LaunchConfiguration("z").perform(context),
+            "-Y",
+            LaunchConfiguration("yaw").perform(context),
+        ],
+    )
 
-    def after_controllers(event, launch_context):
-        return [controller] if event.returncode == 0 else [EmitEvent(event=Shutdown(reason='Controller activation failed'))]
+    controller_spawner = Node(
+        package="controller_manager",
+        executable="spawner",
+        namespace=namespace,
+        output="screen",
+        arguments=[
+            "joint_state_broadcaster",
+            "steering_controller",
+            "wheel_controller",
+            "--controller-manager",
+            f"{namespace}/controller_manager",
+            "--controller-manager-timeout",
+            "60",
+            "--param-file",
+            controllers_file,
+        ],
+    )
 
-    actions = [RegisterEventHandler(OnShutdown(on_shutdown=cleanup)),
-               RegisterEventHandler(OnProcessExit(target_action=spawn, on_exit=after_spawn)),
-               RegisterEventHandler(OnProcessExit(target_action=spawner, on_exit=after_controllers)),
-               state_publisher, spawn]
-    if truth:
-        topic = f'/model/{arg("robot_name")}/odometry'
-        actions.append(Node(package='ros_gz_bridge', executable='parameter_bridge',
-                            namespace=namespace, name='ground_truth_bridge',
-                            arguments=[topic + '@nav_msgs/msg/Odometry[ignition.msgs.Odometry'],
-                            remappings=[(topic, f'{namespace}/ground_truth/odom')],
-                            parameters=[{'use_sim_time': True}], output='screen'))
-    return actions
+    controller_node_parameters = dict(configuration["control"])
+    for parameter_name in ("wheelbase", "track_width", "wheel_radius"):
+        controller_node_parameters[parameter_name] = configuration["geometry"][
+            parameter_name
+        ]
+    controller_node_parameters.update(
+        {
+            "use_sim_time": True,
+            "joint_prefix": prefix,
+            "frame_prefix": prefix,
+        }
+    )
+    swerve_controller = Node(
+        package=PACKAGE_NAME,
+        executable="swerve_controller",
+        namespace=namespace,
+        output="screen",
+        parameters=[controller_node_parameters],
+    )
+
+    robot_bridge_config = os.path.join(
+        package_share,
+        "config",
+        version["robot_bridge"],
+    )
+    ground_truth_bridge_parameters = {
+        "config_file": robot_bridge_config,
+        "expand_gz_topic_names": True,
+        "use_sim_time": True,
+    }
+    ground_truth_bridge = Node(
+        package="ros_gz_bridge",
+        executable="parameter_bridge",
+        name="ground_truth_bridge",
+        namespace=namespace,
+        output="screen",
+        condition=IfCondition(LaunchConfiguration("publish_ground_truth")),
+        parameters=[ground_truth_bridge_parameters],
+    )
+
+    def start_controllers_after_spawn(event, launch_context):
+        del launch_context
+        if event.returncode == 0:
+            return [controller_spawner]
+        return [EmitEvent(event=Shutdown(reason="Model spawn failed"))]
+
+    def start_swerve_controller(event, launch_context):
+        del launch_context
+        if event.returncode == 0:
+            return [swerve_controller]
+        return [EmitEvent(event=Shutdown(reason="Controller activation failed"))]
+
+    cleanup_handler = RegisterEventHandler(
+        OnShutdown(on_shutdown=remove_temporary_controller_file)
+    )
+    spawn_handler = RegisterEventHandler(
+        OnProcessExit(
+            target_action=spawn_model,
+            on_exit=start_controllers_after_spawn,
+        )
+    )
+    controller_handler = RegisterEventHandler(
+        OnProcessExit(
+            target_action=controller_spawner,
+            on_exit=start_swerve_controller,
+        )
+    )
+
+    return [
+        cleanup_handler,
+        spawn_handler,
+        controller_handler,
+        robot_state_publisher,
+        ground_truth_bridge,
+        spawn_model,
+    ]
 
 
 def generate_launch_description():
-    share = get_package_share_directory('swerve_gazebo_sim')
-    defaults = dict(config=os.path.join(share, 'config', 'swerve.yaml'), namespace='', prefix='auto',
-                    robot_name='swerve', world_name='swerve_world', x='0', y='0', z='0.02', yaw='0',
-                    use_sim_time='true', publish_ground_truth='false')
-    return LaunchDescription([DeclareLaunchArgument(k, default_value=v) for k, v in defaults.items()]
-                             + [OpaqueFunction(function=setup)])
+    package_share = get_package_share_directory(PACKAGE_NAME)
+
+    declare_gazebo_version = DeclareLaunchArgument(
+        "gazebo_version",
+        default_value="ign",
+        description="Gazebo family: 'ign' for Fortress or 'gz' for Harmonic",
+    )
+    declare_config = DeclareLaunchArgument(
+        "config",
+        default_value=os.path.join(package_share, "config", "swerve.yaml"),
+        description="Swerve geometry and controller configuration",
+    )
+    declare_namespace = DeclareLaunchArgument(
+        "namespace",
+        default_value="",
+        description="ROS namespace for this robot",
+    )
+    declare_prefix = DeclareLaunchArgument(
+        "prefix",
+        default_value="auto",
+        description="Link, joint and frame prefix; 'auto' derives it from namespace",
+    )
+    declare_robot_name = DeclareLaunchArgument(
+        "robot_name",
+        default_value="swerve",
+        description="Unique Gazebo entity name",
+    )
+    declare_world_name = DeclareLaunchArgument(
+        "world_name",
+        default_value="swerve_world",
+        description="Name of the running Gazebo world",
+    )
+    declare_publish_ground_truth = DeclareLaunchArgument(
+        "publish_ground_truth",
+        default_value="false",
+        description="Publish Gazebo ground-truth odometry for validation",
+    )
+    declare_x = DeclareLaunchArgument(
+        "x",
+        default_value="0",
+        description="Initial world x position in metres",
+    )
+    declare_y = DeclareLaunchArgument(
+        "y",
+        default_value="0",
+        description="Initial world y position in metres",
+    )
+    declare_z = DeclareLaunchArgument(
+        "z",
+        default_value="0.02",
+        description="Initial world z position in metres",
+    )
+    declare_yaw = DeclareLaunchArgument(
+        "yaw",
+        default_value="0",
+        description="Initial world yaw angle in radians",
+    )
+
+    launch_description = LaunchDescription()
+    launch_description.add_action(declare_gazebo_version)
+    launch_description.add_action(declare_config)
+    launch_description.add_action(declare_namespace)
+    launch_description.add_action(declare_prefix)
+    launch_description.add_action(declare_robot_name)
+    launch_description.add_action(declare_world_name)
+    launch_description.add_action(declare_publish_ground_truth)
+    launch_description.add_action(declare_x)
+    launch_description.add_action(declare_y)
+    launch_description.add_action(declare_z)
+    launch_description.add_action(declare_yaw)
+    launch_description.add_action(OpaqueFunction(function=launch_setup))
+    return launch_description

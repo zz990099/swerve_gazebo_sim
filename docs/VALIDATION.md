@@ -71,3 +71,22 @@ command targets. A comparison of expanded URDFs found the same model and
 plugin fields before and after the split; the root name and XML element order
 changed. The intermittent lateral odometry error remains a simulation test
 limitation and has not been attributed to the URDF split.
+
+## Gazebo family and style validation (2026-09-28)
+
+The launch, controller and test Python files were formatted with Black and
+checked with Ruff. `package.xml`, all Xacro files and both bundled SDF worlds
+passed XML parsing. An isolated Humble workspace build passed all 37 reported
+tests with no errors or failures.
+
+The Fortress two-robot physical test passed all seven motion segments, command
+timeout stopping, separate TF and odometry chains, and the stationary-peer
+check. This run used the new `clock_bridge_ign.yaml` and
+`robot_bridge_ign.yaml` files, so it also verifies the configuration-file bridge
+path and relative namespaced ground-truth topic. A final single-robot run after
+the controller readability changes passed the same motion and stopping checks.
+
+The Harmonic model, `gz.msgs` bridge configuration and `gz-sim` world were
+validated by Xacro expansion, YAML assertions and XML parsing. A Harmonic
+runtime was not installed in the validation container, so the `gz` family was
+not physically simulated in this record.

@@ -54,6 +54,13 @@ wheel. Gazebo ground truth is never used in that estimator or in the controller.
 tree; all Gazebo tags live in the plugins file. The public model takes a single
 configuration file argument, along with the names and paths needed to spawn it.
 The single YAML configuration supplies dimensions to both Xacro and kinematics.
+
+The launch interface selects one of two explicit Gazebo families. `ign` uses
+Gazebo Sim 6, Ignition Transport message names and Ignition plugin names. `gz`
+uses Gazebo Sim 8, Gazebo Transport message names and `gz-sim` plugin names.
+Each family has a matching world and bridge YAML files. No runtime probing or
+fallback aliases are used, so a requested family always produces one known set
+of model, world and bridge settings.
 Model link names, joint names and odometry frames share one prefix. ROS topics and
 controller managers use a ROS namespace. Global TF topics combine frames from all
 robots, while one world clock serves every robot.

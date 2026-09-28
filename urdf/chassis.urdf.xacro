@@ -1,73 +1,176 @@
 <?xml version="1.0"?>
 <!-- SPDX-License-Identifier: Apache-2.0 -->
 <robot xmlns:xacro="http://www.ros.org/wiki/xacro">
-  <!-- Physical links, joints, limits and inertias. Gazebo systems live in plugins. -->
+  <!-- Physical links, joints, limits and inertias. -->
   <xacro:macro name="swerve_chassis" params="prefix geometry control">
-    <xacro:property name="wheelbase" value="${geometry['wheelbase']}"/>
-    <xacro:property name="track_width" value="${geometry['track_width']}"/>
-    <xacro:property name="wheel_radius" value="${geometry['wheel_radius']}"/>
-    <xacro:property name="wheel_width" value="${geometry['wheel_width']}"/>
-    <xacro:property name="body_length" value="${geometry['body_length']}"/>
-    <xacro:property name="body_width" value="${geometry['body_width']}"/>
-    <xacro:property name="body_height" value="${geometry['body_height']}"/>
-    <xacro:property name="ground_clearance" value="${geometry['ground_clearance']}"/>
-    <xacro:property name="body_mass" value="${geometry['body_mass']}"/>
-    <xacro:property name="wheel_mass" value="${geometry['wheel_mass']}"/>
-    <xacro:property name="steering_mass" value="${geometry['steering_mass']}"/>
-    <xacro:property name="steering_limit" value="${control['steering_limit']}"/>
-    <xacro:property name="max_wheel_speed" value="${control['max_wheel_speed']}"/>
-    <xacro:property name="max_steering_rate" value="${control['max_steering_rate']}"/>
-    <xacro:property name="base_z" value="${ground_clearance + body_height / 2}"/>
-    <material name="body_blue"><color rgba="0.12 0.35 0.65 1"/></material>
-    <material name="rubber"><color rgba="0.12 0.12 0.14 1"/></material>
-    <material name="steer_orange"><color rgba="1.0 0.45 0.08 1"/></material>
-    <link name="${prefix}base_footprint"/>
+    <xacro:property name="wheelbase" value="${geometry['wheelbase']}" />
+    <xacro:property name="track_width" value="${geometry['track_width']}" />
+    <xacro:property name="wheel_radius" value="${geometry['wheel_radius']}" />
+    <xacro:property name="wheel_width" value="${geometry['wheel_width']}" />
+    <xacro:property name="body_length" value="${geometry['body_length']}" />
+    <xacro:property name="body_width" value="${geometry['body_width']}" />
+    <xacro:property name="body_height" value="${geometry['body_height']}" />
+    <xacro:property
+      name="ground_clearance"
+      value="${geometry['ground_clearance']}"
+    />
+    <xacro:property name="body_mass" value="${geometry['body_mass']}" />
+    <xacro:property name="wheel_mass" value="${geometry['wheel_mass']}" />
+    <xacro:property
+      name="steering_mass"
+      value="${geometry['steering_mass']}"
+    />
+    <xacro:property
+      name="steering_limit"
+      value="${control['steering_limit']}"
+    />
+    <xacro:property
+      name="max_wheel_speed"
+      value="${control['max_wheel_speed']}"
+    />
+    <xacro:property
+      name="max_steering_rate"
+      value="${control['max_steering_rate']}"
+    />
+    <xacro:property
+      name="base_z"
+      value="${ground_clearance + body_height / 2}"
+    />
+
+    <material name="body_blue">
+      <color rgba="0.12 0.35 0.65 1" />
+    </material>
+    <material name="rubber">
+      <color rgba="0.12 0.12 0.14 1" />
+    </material>
+    <material name="steer_orange">
+      <color rgba="1.0 0.45 0.08 1" />
+    </material>
+
+    <link name="${prefix}base_footprint" />
+
     <joint name="${prefix}base_joint" type="fixed">
-      <parent link="${prefix}base_footprint"/><child link="${prefix}base_link"/>
-      <origin xyz="0 0 ${base_z}"/>
+      <parent link="${prefix}base_footprint" />
+      <child link="${prefix}base_link" />
+      <origin xyz="0 0 ${base_z}" />
     </joint>
+
     <link name="${prefix}base_link">
-      <visual><geometry><box size="${body_length} ${body_width} ${body_height}"/></geometry><material name="body_blue"/></visual>
-      <collision><geometry><box size="${body_length} ${body_width} ${body_height}"/></geometry></collision>
+      <visual>
+        <geometry>
+          <box size="${body_length} ${body_width} ${body_height}" />
+        </geometry>
+        <material name="body_blue" />
+      </visual>
+      <collision>
+        <geometry>
+          <box size="${body_length} ${body_width} ${body_height}" />
+        </geometry>
+      </collision>
       <inertial>
-        <mass value="${body_mass}"/>
-        <inertia ixx="${body_mass*(body_width*body_width+body_height*body_height)/12}" iyy="${body_mass*(body_length*body_length+body_height*body_height)/12}"
-                 izz="${body_mass*(body_length*body_length+body_width*body_width)/12}" ixy="0" ixz="0" iyz="0"/>
+        <mass value="${body_mass}" />
+        <inertia
+          ixx="${body_mass * (body_width * body_width + body_height * body_height) / 12}"
+          ixy="0"
+          ixz="0"
+          iyy="${body_mass * (body_length * body_length + body_height * body_height) / 12}"
+          iyz="0"
+          izz="${body_mass * (body_length * body_length + body_width * body_width) / 12}"
+        />
       </inertial>
     </link>
+
     <xacro:macro name="swerve_module" params="name x y">
       <joint name="${prefix}${name}_steering_joint" type="revolute">
-        <parent link="${prefix}base_link"/><child link="${prefix}${name}_steering_link"/>
-        <origin xyz="${x} ${y} ${wheel_radius-base_z}"/>
-        <axis xyz="0 0 1"/>
-        <limit lower="${-steering_limit}" upper="${steering_limit}"
-               effort="30" velocity="${max_steering_rate}"/>
-        <dynamics damping="0.1" friction="0.0"/>
+        <parent link="${prefix}base_link" />
+        <child link="${prefix}${name}_steering_link" />
+        <origin xyz="${x} ${y} ${wheel_radius - base_z}" />
+        <axis xyz="0 0 1" />
+        <limit
+          lower="${-steering_limit}"
+          upper="${steering_limit}"
+          effort="30"
+          velocity="${max_steering_rate}"
+        />
+        <dynamics damping="0.1" friction="0.0" />
       </joint>
+
       <link name="${prefix}${name}_steering_link">
-        <visual><origin xyz="0 0 ${wheel_radius*0.65}"/><geometry><box size="0.04 0.04 0.04"/></geometry><material name="steer_orange"/></visual>
-        <inertial><mass value="${steering_mass}"/>
-          <inertia ixx="${steering_mass*0.04*0.04/6}" iyy="${steering_mass*0.04*0.04/6}" izz="${steering_mass*0.04*0.04/6}" ixy="0" ixz="0" iyz="0"/>
+        <visual>
+          <origin xyz="0 0 ${wheel_radius * 0.65}" />
+          <geometry>
+            <box size="0.04 0.04 0.04" />
+          </geometry>
+          <material name="steer_orange" />
+        </visual>
+        <inertial>
+          <mass value="${steering_mass}" />
+          <inertia
+            ixx="${steering_mass * 0.04 * 0.04 / 6}"
+            ixy="0"
+            ixz="0"
+            iyy="${steering_mass * 0.04 * 0.04 / 6}"
+            iyz="0"
+            izz="${steering_mass * 0.04 * 0.04 / 6}"
+          />
         </inertial>
       </link>
+
       <joint name="${prefix}${name}_wheel_joint" type="continuous">
-        <parent link="${prefix}${name}_steering_link"/><child link="${prefix}${name}_wheel_link"/>
-        <axis xyz="0 1 0"/>
-        <limit effort="20" velocity="${max_wheel_speed}"/>
-        <dynamics damping="0.01" friction="0.0"/>
+        <parent link="${prefix}${name}_steering_link" />
+        <child link="${prefix}${name}_wheel_link" />
+        <axis xyz="0 1 0" />
+        <limit effort="20" velocity="${max_wheel_speed}" />
+        <dynamics damping="0.01" friction="0.0" />
       </joint>
+
       <link name="${prefix}${name}_wheel_link">
-        <visual><origin rpy="${pi/2} 0 0"/><geometry><cylinder radius="${wheel_radius}" length="${wheel_width}"/></geometry><material name="rubber"/></visual>
-        <collision><origin rpy="${pi/2} 0 0"/><geometry><cylinder radius="${wheel_radius}" length="${wheel_width}"/></geometry></collision>
-        <inertial><mass value="${wheel_mass}"/>
-          <inertia ixx="${wheel_mass*(3*wheel_radius*wheel_radius+wheel_width*wheel_width)/12}" iyy="${wheel_mass*wheel_radius*wheel_radius/2}"
-                   izz="${wheel_mass*(3*wheel_radius*wheel_radius+wheel_width*wheel_width)/12}" ixy="0" ixz="0" iyz="0"/>
+        <visual>
+          <origin rpy="${pi / 2} 0 0" />
+          <geometry>
+            <cylinder radius="${wheel_radius}" length="${wheel_width}" />
+          </geometry>
+          <material name="rubber" />
+        </visual>
+        <collision>
+          <origin rpy="${pi / 2} 0 0" />
+          <geometry>
+            <cylinder radius="${wheel_radius}" length="${wheel_width}" />
+          </geometry>
+        </collision>
+        <inertial>
+          <mass value="${wheel_mass}" />
+          <inertia
+            ixx="${wheel_mass * (3 * wheel_radius * wheel_radius + wheel_width * wheel_width) / 12}"
+            ixy="0"
+            ixz="0"
+            iyy="${wheel_mass * wheel_radius * wheel_radius / 2}"
+            iyz="0"
+            izz="${wheel_mass * (3 * wheel_radius * wheel_radius + wheel_width * wheel_width) / 12}"
+          />
         </inertial>
       </link>
     </xacro:macro>
-    <xacro:swerve_module name="fl" x="${wheelbase/2}" y="${track_width/2}"/>
-    <xacro:swerve_module name="fr" x="${wheelbase/2}" y="${-track_width/2}"/>
-    <xacro:swerve_module name="rl" x="${-wheelbase/2}" y="${track_width/2}"/>
-    <xacro:swerve_module name="rr" x="${-wheelbase/2}" y="${-track_width/2}"/>
+
+    <xacro:swerve_module
+      name="fl"
+      x="${wheelbase / 2}"
+      y="${track_width / 2}"
+    />
+    <xacro:swerve_module
+      name="fr"
+      x="${wheelbase / 2}"
+      y="${-track_width / 2}"
+    />
+    <xacro:swerve_module
+      name="rl"
+      x="${-wheelbase / 2}"
+      y="${track_width / 2}"
+    />
+    <xacro:swerve_module
+      name="rr"
+      x="${-wheelbase / 2}"
+      y="${-track_width / 2}"
+    />
   </xacro:macro>
 </robot>

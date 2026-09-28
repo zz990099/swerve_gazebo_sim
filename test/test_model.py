@@ -1,84 +1,200 @@
-from pathlib import Path
 import xml.etree.ElementTree as ET
+from pathlib import Path
+from textwrap import dedent
 
 import pytest
 import xacro
 import yaml
 
-from swerve_gazebo_sim.bringup import controller_config, load_config, names
-
+from swerve_gazebo_sim.bringup import (
+    controller_config,
+    gazebo_variant,
+    load_config,
+    names,
+)
 
 ROOT = Path(__file__).resolve().parents[1]
 
 
 def test_geometry_has_eight_actuated_joints_and_consistent_dimensions(tmp_path):
-    cfg = load_config(ROOT / 'config/swerve.yaml')
-    wrapper = tmp_path / 'chassis_only.urdf.xacro'
+    cfg = load_config(ROOT / "config/swerve.yaml")
+    wrapper = tmp_path / "chassis_only.urdf.xacro"
     wrapper.write_text(
-        '<robot xmlns:xacro="http://www.ros.org/wiki/xacro">'
-        f'<xacro:property name="settings" value="${{xacro.load_yaml(\'{ROOT / "config/swerve.yaml"}\')}}"/>'
-        f'<xacro:include filename="{ROOT / "urdf/chassis.urdf.xacro"}"/>'
-        '<xacro:swerve_chassis prefix="test_" '
-        'geometry="${settings[\'geometry\']}" control="${settings[\'control\']}"/>'
-        '</robot>')
+        dedent(
+            f"""\
+            <robot xmlns:xacro="http://www.ros.org/wiki/xacro">
+              <xacro:property
+                name="settings"
+                value="${{xacro.load_yaml('{ROOT / 'config/swerve.yaml'}')}}"
+              />
+              <xacro:include
+                filename="{ROOT / 'urdf/chassis.urdf.xacro'}"
+              />
+              <xacro:swerve_chassis
+                prefix="test_"
+                geometry="${{settings['geometry']}}"
+                control="${{settings['control']}}"
+              />
+            </robot>
+            """
+        ),
+        encoding="utf-8",
+    )
     root = ET.fromstring(xacro.process_file(str(wrapper)).toxml())
-    joints = [j for j in root.findall('joint') if j.get('type') != 'fixed']
+    joints = [j for j in root.findall("joint") if j.get("type") != "fixed"]
     assert len(joints) == 8
-    for corner, sx, sy in [('fl', 1, 1), ('fr', 1, -1), ('rl', -1, 1), ('rr', -1, -1)]:
+    for corner, sx, sy in [("fl", 1, 1), ("fr", 1, -1), ("rl", -1, 1), ("rr", -1, -1)]:
         j = root.find(f"joint[@name='test_{corner}_steering_joint']")
-        xyz = [float(v) for v in j.find('origin').get('xyz').split()]
-        assert xyz[:2] == pytest.approx([sx * cfg['geometry']['wheelbase'] / 2,
-                                        sy * cfg['geometry']['track_width'] / 2])
-        wheel = root.find(f"link[@name='test_{corner}_wheel_link']/collision/geometry/cylinder")
-        assert float(wheel.get('radius')) == cfg['geometry']['wheel_radius']
-    assert not root.findall('.//mesh')
-    assert not root.findall('.//gazebo')
-    assert not root.findall('.//ros2_control')
-    for inertial in root.findall('.//inertial'):
-        assert float(inertial.find('mass').get('value')) > 0
-        assert all(float(inertial.find('inertia').get(key)) > 0 for key in ('ixx', 'iyy', 'izz'))
+        xyz = [float(v) for v in j.find("origin").get("xyz").split()]
+        assert xyz[:2] == pytest.approx(
+            [
+                sx * cfg["geometry"]["wheelbase"] / 2,
+                sy * cfg["geometry"]["track_width"] / 2,
+            ]
+        )
+        wheel = root.find(
+            f"link[@name='test_{corner}_wheel_link']/collision/geometry/cylinder"
+        )
+        assert float(wheel.get("radius")) == cfg["geometry"]["wheel_radius"]
+    assert not root.findall(".//mesh")
+    assert not root.findall(".//gazebo")
+    assert not root.findall(".//ros2_control")
+    for inertial in root.findall(".//inertial"):
+        assert float(inertial.find("mass").get("value")) > 0
+        assert all(
+            float(inertial.find("inertia").get(key)) > 0
+            for key in ("ixx", "iyy", "izz")
+        )
 
 
-def test_public_model_combines_chassis_and_plugins():
-    model = ROOT / 'urdf/swerve_drive.urdf.xacro'
-    mappings = dict(config_file=str(ROOT / 'config/swerve.yaml'),
-                    prefix='robot1_', namespace='/robot1', robot_name='robot1',
-                    controllers_file='/tmp/controllers.yaml')
+@pytest.mark.parametrize(
+    ("gazebo_version", "plugin_filename", "plugin_name"),
+    [
+        (
+            "ign",
+            "ignition-gazebo-odometry-publisher-system",
+            "ignition::gazebo::systems::OdometryPublisher",
+        ),
+        (
+            "gz",
+            "gz-sim-odometry-publisher-system",
+            "gz::sim::systems::OdometryPublisher",
+        ),
+    ],
+)
+def test_public_model_combines_chassis_and_plugins(
+    gazebo_version,
+    plugin_filename,
+    plugin_name,
+):
+    model = ROOT / "urdf/swerve_drive.urdf.xacro"
+    mappings = {
+        "gazebo_version": gazebo_version,
+        "config_file": str(ROOT / "config/swerve.yaml"),
+        "prefix": "robot1_",
+        "namespace": "/robot1",
+        "controllers_file": "/tmp/controllers.yaml",
+    }
     root = ET.fromstring(xacro.process_file(str(model), mappings=mappings).toxml())
-    assert len([j for j in root.findall('joint') if j.get('type') != 'fixed']) == 8
-    assert len(root.findall('.//ros2_control')) == 1
+    assert len([j for j in root.findall("joint") if j.get("type") != "fixed"]) == 8
+    assert len(root.findall(".//ros2_control")) == 1
     assert len(root.findall(".//gazebo[@reference]")) == 4
-    assert len(root.findall('.//gazebo/plugin')) == 1
-    assert root.find('.//gazebo/plugin/parameters').text == '/tmp/controllers.yaml'
-    assert root.find('.//gazebo/plugin/ros/namespace').text == '/robot1'
-    with_truth = ET.fromstring(xacro.process_file(
-        str(model), mappings=dict(mappings, publish_ground_truth='true')).toxml())
-    assert len(with_truth.findall('.//gazebo/plugin')) == 2
-    assert with_truth.find('.//gazebo/plugin/odom_topic').text == '/model/robot1/odometry'
+    assert len(root.findall(".//gazebo/plugin")) == 1
+    assert root.find(".//gazebo/plugin/parameters").text == "/tmp/controllers.yaml"
+    assert root.find(".//gazebo/plugin/ros/namespace").text == "/robot1"
+    with_truth = ET.fromstring(
+        xacro.process_file(
+            str(model),
+            mappings=dict(mappings, publish_ground_truth="true"),
+        ).toxml()
+    )
+    assert len(with_truth.findall(".//gazebo/plugin")) == 2
+    odometry_plugin = with_truth.find(
+        f".//gazebo/plugin[@filename='{plugin_filename}']"
+    )
+    assert odometry_plugin is not None
+    assert odometry_plugin.get("name") == plugin_name
+    assert odometry_plugin.find("odom_topic").text == "/robot1/ground_truth/odom"
+
+
+def test_gazebo_variants_reference_version_specific_files():
+    ignition = gazebo_variant("ign")
+    harmonic = gazebo_variant("gz")
+
+    assert ignition["sim_version"] == "6"
+    assert harmonic["sim_version"] == "8"
+    assert (ROOT / "worlds" / ignition["world"]).is_file()
+    assert (ROOT / "worlds" / harmonic["world"]).is_file()
+    assert (ROOT / "config" / ignition["clock_bridge"]).is_file()
+    assert (ROOT / "config" / harmonic["clock_bridge"]).is_file()
+    assert (ROOT / "config" / ignition["robot_bridge"]).is_file()
+    assert (ROOT / "config" / harmonic["robot_bridge"]).is_file()
+
+    ignition_clock_bridge = yaml.safe_load(
+        (ROOT / "config" / ignition["clock_bridge"]).read_text(encoding="utf-8")
+    )
+    harmonic_clock_bridge = yaml.safe_load(
+        (ROOT / "config" / harmonic["clock_bridge"]).read_text(encoding="utf-8")
+    )
+    ignition_robot_bridge = yaml.safe_load(
+        (ROOT / "config" / ignition["robot_bridge"]).read_text(encoding="utf-8")
+    )
+    harmonic_robot_bridge = yaml.safe_load(
+        (ROOT / "config" / harmonic["robot_bridge"]).read_text(encoding="utf-8")
+    )
+    assert ignition_clock_bridge[0]["gz_type_name"] == "ignition.msgs.Clock"
+    assert harmonic_clock_bridge[0]["gz_type_name"] == "gz.msgs.Clock"
+    assert ignition_robot_bridge[0]["gz_type_name"] == "ignition.msgs.Odometry"
+    assert harmonic_robot_bridge[0]["gz_type_name"] == "gz.msgs.Odometry"
+
+    ignition_world = ET.parse(ROOT / "worlds" / ignition["world"]).getroot()
+    harmonic_world = ET.parse(ROOT / "worlds" / harmonic["world"]).getroot()
+    ignition_plugins = [
+        plugin.get("filename") for plugin in ignition_world.findall(".//plugin")
+    ]
+    harmonic_plugins = [
+        plugin.get("filename") for plugin in harmonic_world.findall(".//plugin")
+    ]
+    assert "ignition-gazebo-physics-system" in ignition_plugins
+    assert "gz-sim-physics-system" in harmonic_plugins
+
+    with pytest.raises(ValueError):
+        gazebo_variant("automatic")
 
 
 def test_public_model_uses_custom_config_without_dimension_arguments(tmp_path):
-    cfg = load_config(ROOT / 'config/swerve.yaml')
-    cfg['geometry']['wheelbase'] = 0.8
-    cfg['control']['max_wheel_speed'] = 16.0
-    config = tmp_path / 'custom.yaml'
+    cfg = load_config(ROOT / "config/swerve.yaml")
+    cfg["geometry"]["wheelbase"] = 0.8
+    cfg["control"]["max_wheel_speed"] = 16.0
+    config = tmp_path / "custom.yaml"
     config.write_text(yaml.safe_dump(cfg))
-    model = ROOT / 'urdf/swerve_drive.urdf.xacro'
-    root = ET.fromstring(xacro.process_file(
-        str(model), mappings={'config_file': str(config)}).toxml())
+    model = ROOT / "urdf/swerve_drive.urdf.xacro"
+    root = ET.fromstring(
+        xacro.process_file(str(model), mappings={"config_file": str(config)}).toxml()
+    )
     steering = root.find("joint[@name='fl_steering_joint']/origin")
-    assert float(steering.get('xyz').split()[0]) == pytest.approx(0.4)
-    maximum = root.find("ros2_control/joint[@name='fl_wheel_joint']/command_interface/param[@name='max']")
+    assert float(steering.get("xyz").split()[0]) == pytest.approx(0.4)
+    maximum = root.find(
+        "ros2_control/joint[@name='fl_wheel_joint']/command_interface/param[@name='max']"
+    )
     assert float(maximum.text) == 16.0
 
 
 def test_namespace_and_controller_joint_alignment():
-    ns, prefix = names('/fleet/robot1/', 'robot1', 'auto')
-    assert (ns, prefix) == ('/fleet/robot1', 'fleet_robot1_')
-    cfg = controller_config(ROOT / 'config/controllers.yaml', load_config(ROOT / 'config/swerve.yaml'), ns, prefix)
-    assert cfg['/fleet/robot1/wheel_controller']['ros__parameters']['joints'][0] == 'fleet_robot1_fl_wheel_joint'
+    ns, prefix = names("/fleet/robot1/", "robot1", "auto")
+    assert (ns, prefix) == ("/fleet/robot1", "fleet_robot1_")
+    cfg = controller_config(
+        ROOT / "config/controllers.yaml",
+        load_config(ROOT / "config/swerve.yaml"),
+        ns,
+        prefix,
+    )
+    assert (
+        cfg["/fleet/robot1/wheel_controller"]["ros__parameters"]["joints"][0]
+        == "fleet_robot1_fl_wheel_joint"
+    )
 
 
 def test_invalid_namespace():
     with pytest.raises(ValueError):
-        names('bad-name', 'swerve', 'auto')
+        names("bad-name", "swerve", "auto")

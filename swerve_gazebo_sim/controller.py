@@ -15,27 +15,48 @@ from .kinematics import SwerveKinematics, integrate_pose
 
 class SwerveController(Node):
     def __init__(self, **kwargs):
-        super().__init__('swerve_controller', **kwargs)
-        defaults = dict(wheelbase=0.6, track_width=0.5, wheel_radius=0.1,
-                        steering_limit=math.pi / 2, update_rate=100.0,
-                        cmd_timeout=0.5, feedback_timeout=0.25,
-                        max_wheel_speed=20.0, max_wheel_acceleration=40.0,
-                        max_steering_rate=2.5, publish_odom_tf=True,
-                        pose_variance=0.02, twist_variance=0.02,
-                        joint_prefix='', frame_prefix='')
+        super().__init__("swerve_controller", **kwargs)
+        defaults = {
+            "wheelbase": 0.6,
+            "track_width": 0.5,
+            "wheel_radius": 0.1,
+            "steering_limit": math.pi / 2,
+            "update_rate": 100.0,
+            "cmd_timeout": 0.5,
+            "feedback_timeout": 0.25,
+            "max_wheel_speed": 20.0,
+            "max_wheel_acceleration": 40.0,
+            "max_steering_rate": 2.5,
+            "publish_odom_tf": True,
+            "pose_variance": 0.02,
+            "twist_variance": 0.02,
+            "joint_prefix": "",
+            "frame_prefix": "",
+        }
         for key, value in defaults.items():
             self.declare_parameter(key, value)
-        self.cfg = {key: self.get_parameter(key).value for key in defaults}
-        for key, value in self.cfg.items():
+        self.configuration = {key: self.get_parameter(key).value for key in defaults}
+        for key, value in self.configuration.items():
             if isinstance(value, float) and (not math.isfinite(value) or value <= 0):
-                raise ValueError(f'{key} must be finite and positive')
-        c = self.cfg
-        self.kinematics = SwerveKinematics(c['wheelbase'], c['track_width'],
-                                         c['wheel_radius'], c['steering_limit'])
-        self.wheels = [c['joint_prefix'] + p + '_wheel_joint' for p in ('fl', 'fr', 'rl', 'rr')]
-        self.steers = [c['joint_prefix'] + p + '_steering_joint' for p in ('fl', 'fr', 'rl', 'rr')]
-        self.odom_frame = c['frame_prefix'] + 'odom'
-        self.base_frame = c['frame_prefix'] + 'base_footprint'
+                raise ValueError(f"{key} must be finite and positive")
+
+        self.kinematics = SwerveKinematics(
+            self.configuration["wheelbase"],
+            self.configuration["track_width"],
+            self.configuration["wheel_radius"],
+            self.configuration["steering_limit"],
+        )
+        corners = ("fl", "fr", "rl", "rr")
+        self.wheel_joint_names = [
+            self.configuration["joint_prefix"] + corner + "_wheel_joint"
+            for corner in corners
+        ]
+        self.steering_joint_names = [
+            self.configuration["joint_prefix"] + corner + "_steering_joint"
+            for corner in corners
+        ]
+        self.odom_frame = self.configuration["frame_prefix"] + "odom"
+        self.base_frame = self.configuration["frame_prefix"] + "base_footprint"
         self.command = (0.0, 0.0, 0.0)
         self.command_stamp = None
         self.feedback_stamp = None
@@ -45,22 +66,37 @@ class SwerveController(Node):
         self.pose = (0.0, 0.0, 0.0)
         self.previous_odom_stamp = None
         self.last_tick = self.get_clock().now().nanoseconds * 1e-9
-        self.wheel_pub = self.create_publisher(Float64MultiArray, 'wheel_controller/commands', 10)
-        self.steer_pub = self.create_publisher(Float64MultiArray, 'steering_controller/commands', 10)
-        self.odom_pub = self.create_publisher(Odometry, 'odom', 10)
-        self.tf = TransformBroadcaster(self) if c['publish_odom_tf'] else None
-        self.create_subscription(TwistStamped, 'cmd_vel', self.on_command, 10)
-        self.create_subscription(JointState, 'joint_states', self.on_feedback, 10)
-        self.create_timer(1.0 / c['update_rate'], self.on_timer)
+        self.wheel_pub = self.create_publisher(
+            Float64MultiArray, "wheel_controller/commands", 10
+        )
+        self.steer_pub = self.create_publisher(
+            Float64MultiArray, "steering_controller/commands", 10
+        )
+        self.odom_pub = self.create_publisher(Odometry, "odom", 10)
+        self.transform_broadcaster = (
+            TransformBroadcaster(self)
+            if self.configuration["publish_odom_tf"]
+            else None
+        )
+        self.create_subscription(TwistStamped, "cmd_vel", self.on_command, 10)
+        self.create_subscription(JointState, "joint_states", self.on_feedback, 10)
+        self.create_timer(1.0 / self.configuration["update_rate"], self.on_timer)
 
     def on_command(self, msg):
         now = self.get_clock().now().nanoseconds * 1e-9
         stamp = msg.header.stamp.sec + msg.header.stamp.nanosec * 1e-9
         values = (msg.twist.linear.x, msg.twist.linear.y, msg.twist.angular.z)
         # Empty frame means base frame; a zero stamp explicitly uses reception time.
-        if (not all(math.isfinite(v) for v in values)
-                or msg.header.frame_id not in ('', self.base_frame)
-                or (stamp != 0 and (now - stamp > self.cfg['cmd_timeout'] or stamp - now > 0.1))):
+        if (
+            not all(math.isfinite(v) for v in values)
+            or msg.header.frame_id not in ("", self.base_frame)
+            or (
+                stamp != 0
+                and (
+                    now - stamp > self.configuration["cmd_timeout"] or stamp - now > 0.1
+                )
+            )
+        ):
             self.command_stamp = None
             return
         self.command = values
@@ -76,20 +112,47 @@ class SwerveController(Node):
             self.previous_odom_stamp = None
             self.pose = (0.0, 0.0, 0.0)
         dt = max(0.0, min(dt, 0.1))
-        active = (self.command_stamp is not None and self.feedback_stamp is not None
-                  and 0 <= now - self.command_stamp <= self.cfg['cmd_timeout']
-                  and 0 <= now - self.feedback_stamp <= self.cfg['feedback_timeout']
-                  and any(abs(v) > 1e-9 for v in self.command))
-        if active:
+        command_is_current = self.command_stamp is not None and (
+            0 <= now - self.command_stamp <= self.configuration["cmd_timeout"]
+        )
+        feedback_is_current = self.feedback_stamp is not None and (
+            0 <= now - self.feedback_stamp <= self.configuration["feedback_timeout"]
+        )
+        has_motion_command = any(abs(value) > 1e-9 for value in self.command)
+
+        if command_is_current and feedback_is_current and has_motion_command:
             speeds, targets = self.kinematics.inverse(*self.command, self.angles)
-            scale = max(1.0, max(abs(v) for v in speeds) / self.cfg['max_wheel_speed'])
-            for i in range(4):
-                step = self.cfg['max_steering_rate'] * dt
-                self.sent_angles[i] += max(-step, min(step, targets[i] - self.sent_angles[i]))
+            speed_scale = max(
+                1.0,
+                max(abs(value) for value in speeds)
+                / self.configuration["max_wheel_speed"],
+            )
+            for module_index in range(4):
+                steering_step = self.configuration["max_steering_rate"] * dt
+                self.sent_angles[module_index] += max(
+                    -steering_step,
+                    min(
+                        steering_step,
+                        targets[module_index] - self.sent_angles[module_index],
+                    ),
+                )
                 # Reduce drive while the physical module is not aligned.
-                target = speeds[i] / scale * max(0.0, math.cos(targets[i] - self.angles[i]))
-                step = self.cfg['max_wheel_acceleration'] * dt
-                self.sent_speeds[i] += max(-step, min(step, target - self.sent_speeds[i]))
+                target_speed = (
+                    speeds[module_index]
+                    / speed_scale
+                    * max(
+                        0.0,
+                        math.cos(targets[module_index] - self.angles[module_index]),
+                    )
+                )
+                wheel_step = self.configuration["max_wheel_acceleration"] * dt
+                self.sent_speeds[module_index] += max(
+                    -wheel_step,
+                    min(
+                        wheel_step,
+                        target_speed - self.sent_speeds[module_index],
+                    ),
+                )
         else:
             # Explicit stop, expired command or missing feedback: stop all wheels.
             self.sent_speeds = [0.0] * 4
@@ -98,16 +161,18 @@ class SwerveController(Node):
 
     def on_feedback(self, msg):
         try:
-            wi = [msg.name.index(name) for name in self.wheels]
-            si = [msg.name.index(name) for name in self.steers]
-            speeds = [msg.velocity[i] for i in wi]
-            angles = [msg.position[i] for i in si]
+            wheel_indices = [msg.name.index(name) for name in self.wheel_joint_names]
+            steering_indices = [
+                msg.name.index(name) for name in self.steering_joint_names
+            ]
+            speeds = [msg.velocity[index] for index in wheel_indices]
+            angles = [msg.position[index] for index in steering_indices]
             twist = self.kinematics.forward(speeds, angles)
         except (ValueError, IndexError):
             return
         now = self.get_clock().now().nanoseconds * 1e-9
         stamp = msg.header.stamp.sec + msg.header.stamp.nanosec * 1e-9
-        if stamp - now > 0.1 or now - stamp > self.cfg['feedback_timeout']:
+        if stamp - now > 0.1 or now - stamp > self.configuration["feedback_timeout"]:
             return
         if self.previous_odom_stamp is not None:
             dt = stamp - self.previous_odom_stamp
@@ -116,7 +181,7 @@ class SwerveController(Node):
                 self.command_stamp = None
             elif dt == 0:
                 return
-            elif dt <= self.cfg['feedback_timeout']:
+            elif dt <= self.configuration["feedback_timeout"]:
                 self.pose = integrate_pose(self.pose, twist, dt)
             # A gap does not justify extrapolating an unobserved trajectory.
         self.previous_odom_stamp = stamp
@@ -128,25 +193,28 @@ class SwerveController(Node):
         odom.header.stamp = msg.header.stamp
         odom.header.frame_id = self.odom_frame
         odom.child_frame_id = self.base_frame
-        odom.pose.pose.position.x, odom.pose.pose.position.y = self.pose[:2]
+        odom.pose.pose.position.x = self.pose[0]
+        odom.pose.pose.position.y = self.pose[1]
         odom.pose.pose.orientation.z = math.sin(self.pose[2] / 2)
         odom.pose.pose.orientation.w = math.cos(self.pose[2] / 2)
-        odom.twist.twist.linear.x, odom.twist.twist.linear.y = twist[:2]
+        odom.twist.twist.linear.x = twist[0]
+        odom.twist.twist.linear.y = twist[1]
         odom.twist.twist.angular.z = twist[2]
         for idx in (0, 7, 35):
-            odom.pose.covariance[idx] = self.cfg['pose_variance']
-            odom.twist.covariance[idx] = self.cfg['twist_variance']
+            odom.pose.covariance[idx] = self.configuration["pose_variance"]
+            odom.twist.covariance[idx] = self.configuration["twist_variance"]
         for idx in (14, 21, 28):
-            odom.pose.covariance[idx] = odom.twist.covariance[idx] = 1e6
+            odom.pose.covariance[idx] = 1e6
+            odom.twist.covariance[idx] = 1e6
         self.odom_pub.publish(odom)
-        if self.tf is not None:
+        if self.transform_broadcaster is not None:
             transform = TransformStamped()
             transform.header = odom.header
             transform.child_frame_id = self.base_frame
             transform.transform.translation.x = self.pose[0]
             transform.transform.translation.y = self.pose[1]
             transform.transform.rotation = odom.pose.pose.orientation
-            self.tf.sendTransform(transform)
+            self.transform_broadcaster.sendTransform(transform)
 
 
 def main(args=None):

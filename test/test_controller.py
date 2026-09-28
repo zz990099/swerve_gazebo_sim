@@ -20,7 +20,9 @@ class Capture:
 @pytest.fixture
 def node():
     rclpy.init()
-    result = SwerveController(parameter_overrides=[Parameter('publish_odom_tf', value=False)])
+    result = SwerveController(
+        parameter_overrides=[Parameter("publish_odom_tf", value=False)]
+    )
     result.wheel_pub = Capture()
     result.steer_pub = Capture()
     result.odom_pub = Capture()
@@ -32,7 +34,7 @@ def node():
 def feedback(node):
     msg = JointState()
     msg.header.stamp = node.get_clock().now().to_msg()
-    msg.name = node.wheels + node.steers
+    msg.name = node.wheel_joint_names + node.steering_joint_names
     msg.position = [0.0] * 8
     msg.velocity = [0.0] * 8
     node.on_feedback(msg)
@@ -74,7 +76,7 @@ def test_feedback_timeout_stops(node):
     assert tick(node) == [0.0] * 4
 
 
-@pytest.mark.parametrize('value', [float('nan'), float('inf')])
+@pytest.mark.parametrize("value", [float("nan"), float("inf")])
 def test_nonfinite_command_stops(node, value):
     feedback(node)
     command(node)
@@ -85,7 +87,7 @@ def test_nonfinite_command_stops(node, value):
 
 def test_partial_feedback_ignored(node):
     msg = JointState()
-    msg.name = node.wheels + node.steers
+    msg.name = node.wheel_joint_names + node.steering_joint_names
     node.on_feedback(msg)
     assert node.feedback_stamp is None
 
@@ -99,11 +101,11 @@ def test_encoder_rotation_is_published(node):
     node.on_feedback(msg)
     result = node.odom_pub.messages[-1]
     assert result.twist.twist.angular.z == pytest.approx(1)
-    assert result.header.frame_id == 'odom'
-    assert result.child_frame_id == 'base_footprint'
+    assert result.header.frame_id == "odom"
+    assert result.child_frame_id == "base_footprint"
 
 
-@pytest.mark.parametrize('kind', ['expired', 'future', 'wrong_frame'])
+@pytest.mark.parametrize("kind", ["expired", "future", "wrong_frame"])
 def test_invalid_header_stops(node, kind):
     feedback(node)
     command(node)
@@ -111,12 +113,12 @@ def test_invalid_header_stops(node, kind):
     msg = TwistStamped()
     msg.twist.linear.x = 0.5
     msg.header.stamp = node.get_clock().now().to_msg()
-    if kind == 'expired':
+    if kind == "expired":
         msg.header.stamp.sec -= 1
-    elif kind == 'future':
+    elif kind == "future":
         msg.header.stamp.sec += 1
     else:
-        msg.header.frame_id = 'map'
+        msg.header.frame_id = "map"
     node.on_command(msg)
     assert tick(node) == [0.0] * 4
 

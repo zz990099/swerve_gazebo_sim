@@ -10,9 +10,19 @@ def model():
     return SwerveKinematics(0.6, 0.5, 0.1)
 
 
-@pytest.mark.parametrize('twist', [(0.5, 0, 0), (-0.5, 0, 0), (0, 0.5, 0),
-                                   (0, -0.5, 0), (0, 0, 0.5), (0, 0, -0.5),
-                                   (0.3, 0.2, 0.4), (-0.2, 0.3, -0.5)])
+@pytest.mark.parametrize(
+    "twist",
+    [
+        (0.5, 0, 0),
+        (-0.5, 0, 0),
+        (0, 0.5, 0),
+        (0, -0.5, 0),
+        (0, 0, 0.5),
+        (0, 0, -0.5),
+        (0.3, 0.2, 0.4),
+        (-0.2, 0.3, -0.5),
+    ],
+)
 def test_wheel_velocity_matches_rigid_body_motion(model, twist):
     speeds, angles = model.inverse(*twist, [0.0] * 4)
     for (x, y), speed, angle in zip(model.positions, speeds, angles):
@@ -48,11 +58,17 @@ def test_encoder_yaw_estimate(model):
 
 
 def test_arc_integration():
-    assert integrate_pose((0, 0, 0), (1, 0, 1), math.pi / 2) == pytest.approx((1, 1, math.pi / 2))
-    assert integrate_pose((0, 0, math.pi / 2), (1, 0, 0), 1) == pytest.approx((0, 1, math.pi / 2))
+    assert integrate_pose((0, 0, 0), (1, 0, 1), math.pi / 2) == pytest.approx(
+        (1, 1, math.pi / 2)
+    )
+    assert integrate_pose((0, 0, math.pi / 2), (1, 0, 0), 1) == pytest.approx(
+        (0, 1, math.pi / 2)
+    )
 
 
-@pytest.mark.parametrize('geometry', [(0, .5, .1), (.6, -.5, .1), (.6, .5, float('nan'))])
+@pytest.mark.parametrize(
+    "geometry", [(0, 0.5, 0.1), (0.6, -0.5, 0.1), (0.6, 0.5, float("nan"))]
+)
 def test_invalid_geometry(geometry):
     with pytest.raises(ValueError):
         SwerveKinematics(*geometry)
