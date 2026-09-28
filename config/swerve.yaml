@@ -18,6 +18,7 @@ control:
   max_wheel_speed: 20.0      # rad/s
   max_wheel_acceleration: 40.0  # rad/s^2; timeout stops immediately
   max_steering_rate: 2.5     # rad/s
+  steering_alignment_tolerance: 0.05  # rad; wheels remain stopped outside this error
   steering_limit: 1.5707963267948966
   publish_odom_tf: true
   pose_variance: 0.02       # Fixed nominal covariance, not an uncertainty estimator

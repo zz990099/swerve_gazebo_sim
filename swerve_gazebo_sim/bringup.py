@@ -25,6 +25,7 @@ CONTROL = (
     "max_wheel_speed",
     "max_wheel_acceleration",
     "max_steering_rate",
+    "steering_alignment_tolerance",
     "steering_limit",
     "publish_odom_tf",
     "pose_variance",

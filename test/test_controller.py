@@ -7,6 +7,7 @@ from rclpy.parameter import Parameter
 from sensor_msgs.msg import JointState
 
 from swerve_gazebo_sim.controller import SwerveController
+from swerve_gazebo_sim.kinematics import DriveMode
 
 
 class Capture:
@@ -31,26 +32,42 @@ def node():
     rclpy.shutdown()
 
 
-def feedback(node):
+def feedback(node, steering_angles=None, wheel_speeds=None):
+    if steering_angles is None:
+        steering_angles = [0.0] * 4
+    if wheel_speeds is None:
+        wheel_speeds = [0.0] * 4
+
     msg = JointState()
     msg.header.stamp = node.get_clock().now().to_msg()
     msg.name = node.wheel_joint_names + node.steering_joint_names
-    msg.position = [0.0] * 8
-    msg.velocity = [0.0] * 8
+    msg.position = [0.0] * 4 + list(steering_angles)
+    msg.velocity = list(wheel_speeds) + [0.0] * 4
     node.on_feedback(msg)
     return msg
 
 
-def command(node, x=0.5):
+def command(node, x=0.5, y=0.0, yaw=0.0):
     msg = TwistStamped()
     msg.twist.linear.x = x
+    msg.twist.linear.y = y
+    msg.twist.angular.z = yaw
     node.on_command(msg)
 
 
-def tick(node):
-    node.last_tick = node.get_clock().now().nanoseconds * 1e-9 - 0.01
+def tick(node, period=0.01):
+    node.last_tick = node.get_clock().now().nanoseconds * 1e-9 - period
     node.on_timer()
     return list(node.wheel_pub.messages[-1].data)
+
+
+def settle_steering(node):
+    for _ in range(100):
+        feedback(node, steering_angles=node.sent_angles)
+        wheel_speeds = tick(node, period=0.1)
+        if node.steering_is_aligned:
+            return wheel_speeds
+    raise AssertionError("Steering did not reach its target")
 
 
 def test_no_motion_without_feedback(node):
@@ -58,14 +75,17 @@ def test_no_motion_without_feedback(node):
     assert tick(node) == [0.0] * 4
 
 
-def test_command_timeout_stops_wheels_and_holds_steering(node):
-    feedback(node)
+def test_command_timeout_stops_wheels_and_returns_steering_home(node):
+    feedback(node, steering_angles=[0.4] * 4)
+    node.sent_angles = [0.4] * 4
     command(node)
-    assert min(tick(node)) > 0
-    angles = list(node.sent_angles)
     node.command_stamp -= 1.0
-    assert tick(node) == [0.0] * 4
-    assert node.sent_angles == angles
+    assert tick(node, period=0.1) == [0.0] * 4
+    assert max(abs(angle) for angle in node.sent_angles) < 0.4
+
+    for _ in range(2):
+        tick(node, period=0.1)
+    assert node.sent_angles == pytest.approx([0.0] * 4)
 
 
 def test_feedback_timeout_stops(node):
@@ -74,6 +94,74 @@ def test_feedback_timeout_stops(node):
     assert min(tick(node)) > 0
     node.feedback_stamp -= 1.0
     assert tick(node) == [0.0] * 4
+
+
+def test_spin_waits_for_steering_alignment(node):
+    feedback(node)
+    command(node, x=0.0, yaw=0.5)
+
+    assert tick(node, period=0.1) == [0.0] * 4
+    assert node.requested_mode is DriveMode.SPIN
+    assert not node.steering_is_aligned
+    assert max(abs(angle) for angle in node.sent_angles) > 0.0
+
+    wheel_speeds = settle_steering(node)
+    assert max(abs(speed) for speed in wheel_speeds) > 0.0
+
+
+def test_crab_waits_for_steering_alignment(node):
+    feedback(node)
+    command(node, x=0.0, y=0.4)
+
+    assert tick(node, period=0.1) == [0.0] * 4
+    assert node.requested_mode is DriveMode.CRAB
+    assert not node.steering_is_aligned
+
+    wheel_speeds = settle_steering(node)
+    assert max(abs(speed) for speed in wheel_speeds) > 0.0
+
+
+def test_differential_waits_until_steering_returns_home(node):
+    feedback(node, steering_angles=[0.7] * 4)
+    node.sent_angles = [0.7] * 4
+    command(node, x=0.4)
+
+    assert tick(node, period=0.1) == [0.0] * 4
+    assert node.requested_mode is DriveMode.DIFFERENTIAL
+    assert not node.steering_is_aligned
+
+    wheel_speeds = settle_steering(node)
+    assert node.sent_angles == pytest.approx([0.0] * 4)
+    assert wheel_speeds == pytest.approx([4.0] * 4)
+
+
+def test_direct_crab_to_spin_switch_stops_drive_until_realigned(node):
+    feedback(node)
+    command(node, x=0.0, y=0.4)
+    assert max(abs(speed) for speed in settle_steering(node)) > 0.0
+
+    feedback(node, steering_angles=node.sent_angles)
+    command(node, x=0.0, yaw=0.5)
+
+    assert tick(node, period=0.1) == [0.0] * 4
+    assert node.requested_mode is DriveMode.SPIN
+    assert not node.steering_is_aligned
+    assert max(abs(speed) for speed in settle_steering(node)) > 0.0
+
+
+def test_explicit_stop_returns_crab_steering_home(node):
+    feedback(node)
+    command(node, x=0.0, y=0.4)
+    settle_steering(node)
+    assert max(abs(angle) for angle in node.sent_angles) > 1.0
+
+    command(node, x=0.0)
+    assert tick(node, period=0.1) == [0.0] * 4
+    assert node.requested_mode is DriveMode.STOP
+
+    for _ in range(10):
+        tick(node, period=0.1)
+    assert node.sent_angles == pytest.approx([0.0] * 4)
 
 
 @pytest.mark.parametrize("value", [float("nan"), float("inf")])

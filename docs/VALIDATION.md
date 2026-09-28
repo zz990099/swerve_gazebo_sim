@@ -90,3 +90,19 @@ The Harmonic model, `gz.msgs` bridge configuration and `gz-sim` world were
 validated by Xacro expansion, YAML assertions and XML parsing. A Harmonic
 runtime was not installed in the validation container, so the `gz` family was
 not physically simulated in this record.
+
+## Steering interlock validation (2026-09-28)
+
+An isolated Humble workspace build passed. The kinematics suite passed 24 cases,
+the model suite passed 7 cases and the controller suite passed 16 cases.
+`colcon test-result` reported 50 tests, including the three CTest suite wrappers,
+with no errors or failures. The controller cases verify that spin, crab and
+differential commands keep all drive-wheel commands at zero until all four
+measured steering angles reach their targets. They also verify that explicit
+stop, command timeout and differential-mode entry return steering targets to zero.
+
+The Fortress physical test passed forward, reverse, lateral, spin and combined
+swerve motion. After command timeout, the largest measured chassis velocity was
+0.00023 rad/s and the largest steering-joint offset was 0.0000046 rad. This run
+therefore verified both chassis stopping and steering return-to-home behavior in
+simulation. Black formatting, Ruff checks and Git whitespace checks also passed.

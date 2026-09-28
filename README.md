@@ -55,8 +55,9 @@ frame; a zero stamp uses reception time. Nonzero stamps must use simulation time
 Other frame names, nonfinite values, expired commands and future stamps (>0.1 s)
 are rejected and stop the wheels. Stopping publication stops the wheels after
 `cmd_timeout` (default 0.5 simulation seconds). Explicit zero velocity stops them
-on the next control tick and holds steering orientation. A paused world also pauses
-the watchdog; a wall-clock emergency stop is outside this simulation package.
+on the next control tick. After either stop condition, all steering joints return
+to zero at `max_steering_rate`. A paused world also pauses the watchdog; a
+wall-clock emergency stop is outside this simulation package.
 
 | Relative interface | Type | Meaning |
 |---|---|---|
@@ -113,11 +114,24 @@ each namespace lives in a temporary file and is removed when launch shuts down.
 
 ## Motion model and limits
 
-For a wheel at `(x_i, y_i)`, its velocity is `(vx - wz*y_i, vy + wz*x_i)`.
-The controller chooses a legal steering angle and signed wheel speed, scales all
-wheels together when saturated, limits steering command rate and wheel acceleration,
-and reduces wheel drive while steering is misaligned. Feedback loss stops wheel
-commands. These measures reduce transients but do not provide real hardware safety.
+The controller selects an explicit mode from each body command:
+
+- Differential mode: only longitudinal translation `vx` is present. All
+  steering joints return to zero before the four drive wheels start.
+- Spin mode: only `wz` is nonzero. The four modules form the spin pattern.
+- Crab mode: translation includes `vy` and `wz = 0`. All modules are parallel.
+- Swerve mode: translation and yaw are requested together.
+
+Every motion mode uses a steering interlock. Wheel commands remain exactly zero
+until every measured steering angle is within `steering_alignment_tolerance` of
+its target. The default tolerance is 0.05 rad. This check also applies when a
+mode changes or a crab direction changes. Wheel acceleration limiting begins
+only after alignment. Feedback loss stops wheel commands. These measures reduce
+transients but do not provide real hardware safety.
+
+For spin, crab and combined swerve motion, the velocity at a wheel located at
+`(x_i, y_i)` is `(vx - wz*y_i, vy + wz*x_i)`. A command containing translation
+and yaw uses swerve kinematics instead of relying on tire slip for turning.
 
 Odometry uses measured wheel velocities and steering positions with a least-squares
 rigid-body fit, then SE(2) integration. It assumes rolling without slip and starts at
@@ -138,7 +152,8 @@ colcon test-result --verbose
 ```
 
 The tests check analytic wheel velocities, reverse motion, yaw odometry, pose
-integration, invalid commands, watchdogs, model dimensions and namespacing.
+integration, invalid commands, watchdogs, steering alignment interlocks, steering
+return-to-home behavior, model dimensions and namespacing.
 The integration runner starts a world, executes the physical smoke test and stops
 its processes. Run it in a sourced workspace:
 

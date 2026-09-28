@@ -2,7 +2,12 @@ import math
 
 import pytest
 
-from swerve_gazebo_sim.kinematics import SwerveKinematics, integrate_pose
+from swerve_gazebo_sim.kinematics import (
+    DriveMode,
+    SwerveKinematics,
+    integrate_pose,
+    select_drive_mode,
+)
 
 
 @pytest.fixture
@@ -47,6 +52,47 @@ def test_zero_preserves_angles(model):
     speeds, result = model.inverse(0, 0, 0, angles)
     assert speeds == [0.0] * 4
     assert result == angles
+
+
+@pytest.mark.parametrize(
+    ("twist", "expected_mode"),
+    [
+        ((0.0, 0.0, 0.0), DriveMode.STOP),
+        ((0.4, 0.0, 0.0), DriveMode.DIFFERENTIAL),
+        ((0.4, 0.0, 0.2), DriveMode.SWERVE),
+        ((0.0, 0.4, 0.0), DriveMode.CRAB),
+        ((0.0, 0.0, 0.2), DriveMode.SPIN),
+        ((0.3, 0.2, 0.1), DriveMode.SWERVE),
+    ],
+)
+def test_drive_mode_selection(twist, expected_mode):
+    assert select_drive_mode(*twist) is expected_mode
+
+
+def test_differential_mode_keeps_steering_at_zero(model):
+    mode, wheel_speeds, steering_targets = model.commands_for_motion(
+        0.4,
+        0.0,
+        0.0,
+        [0.5] * 4,
+    )
+
+    assert mode is DriveMode.DIFFERENTIAL
+    assert steering_targets == [0.0] * 4
+    assert wheel_speeds == pytest.approx([4.0] * 4)
+
+
+def test_stop_mode_returns_zero_commands(model):
+    mode, wheel_speeds, steering_targets = model.commands_for_motion(
+        0.0,
+        0.0,
+        0.0,
+        [0.5] * 4,
+    )
+
+    assert mode is DriveMode.STOP
+    assert wheel_speeds == [0.0] * 4
+    assert steering_targets == [0.0] * 4
 
 
 def test_encoder_yaw_estimate(model):

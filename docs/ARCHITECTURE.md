@@ -41,8 +41,16 @@ Adding pi to steering and reversing wheel rate gives the same rolling velocity.
 The controller selects a feasible solution within ±pi/2; when both boundary
 solutions are valid, it chooses the closest to current steering. Near-zero module
 velocity retains its measured angle. Crossing the limited steering range can require
-a large steering transition, during which motion will not track the requested twist
-exactly. This is a finite steering chassis, not a continuously rotating steering model.
+a large steering transition. The controller holds all drive wheels at zero until
+every measured steering angle reaches its target within the configured tolerance.
+This is a finite steering chassis, not a continuously rotating steering model.
+
+Commands are classified as stop, differential, spin, crab or combined swerve.
+Differential mode handles longitudinal translation and fixes all steering targets
+at zero. Spin uses the four-wheel X pattern. Crab keeps all modules parallel.
+Commands that combine translation and yaw use swerve kinematics. Stopping or a
+command timeout immediately zeros drive speed and returns all steering targets to
+zero. The same alignment interlock runs on every mode transition.
 
 For odometry, each measured wheel velocity is projected along its measured steering
 angle. The eight planar components form an overdetermined linear system for the

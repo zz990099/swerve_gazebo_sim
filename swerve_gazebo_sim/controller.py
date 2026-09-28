@@ -10,7 +10,7 @@ from sensor_msgs.msg import JointState
 from std_msgs.msg import Float64MultiArray
 from tf2_ros import TransformBroadcaster
 
-from .kinematics import SwerveKinematics, integrate_pose
+from .kinematics import DriveMode, SwerveKinematics, integrate_pose
 
 
 class SwerveController(Node):
@@ -27,6 +27,7 @@ class SwerveController(Node):
             "max_wheel_speed": 20.0,
             "max_wheel_acceleration": 40.0,
             "max_steering_rate": 2.5,
+            "steering_alignment_tolerance": 0.05,
             "publish_odom_tf": True,
             "pose_variance": 0.02,
             "twist_variance": 0.02,
@@ -63,6 +64,8 @@ class SwerveController(Node):
         self.angles = [0.0] * 4
         self.sent_angles = [0.0] * 4
         self.sent_speeds = [0.0] * 4
+        self.requested_mode = DriveMode.STOP
+        self.steering_is_aligned = True
         self.pose = (0.0, 0.0, 0.0)
         self.previous_odom_stamp = None
         self.last_tick = self.get_clock().now().nanoseconds * 1e-9
@@ -121,43 +124,50 @@ class SwerveController(Node):
         has_motion_command = any(abs(value) > 1e-9 for value in self.command)
 
         if command_is_current and feedback_is_current and has_motion_command:
-            speeds, targets = self.kinematics.inverse(*self.command, self.angles)
-            speed_scale = max(
-                1.0,
-                max(abs(value) for value in speeds)
-                / self.configuration["max_wheel_speed"],
+            mode, wheel_targets, steering_targets = self.kinematics.commands_for_motion(
+                *self.command,
+                self.angles,
             )
-            for module_index in range(4):
-                steering_step = self.configuration["max_steering_rate"] * dt
-                self.sent_angles[module_index] += max(
-                    -steering_step,
-                    min(
-                        steering_step,
-                        targets[module_index] - self.sent_angles[module_index],
-                    ),
-                )
-                # Reduce drive while the physical module is not aligned.
-                target_speed = (
-                    speeds[module_index]
-                    / speed_scale
-                    * max(
-                        0.0,
-                        math.cos(targets[module_index] - self.angles[module_index]),
-                    )
-                )
-                wheel_step = self.configuration["max_wheel_acceleration"] * dt
-                self.sent_speeds[module_index] += max(
-                    -wheel_step,
-                    min(
-                        wheel_step,
-                        target_speed - self.sent_speeds[module_index],
-                    ),
-                )
         else:
-            # Explicit stop, expired command or missing feedback: stop all wheels.
+            mode = DriveMode.STOP
+            wheel_targets = [0.0] * 4
+            steering_targets = [0.0] * 4
+
+        self.requested_mode = mode
+        self._move_steering_toward(steering_targets, dt)
+        self.steering_is_aligned = feedback_is_current and all(
+            abs(target - measured) <= self.configuration["steering_alignment_tolerance"]
+            for target, measured in zip(steering_targets, self.angles)
+        )
+
+        if mode is DriveMode.STOP or not self.steering_is_aligned:
+            # Stop immediately while steering returns home or changes mode.
             self.sent_speeds = [0.0] * 4
+        else:
+            self._move_wheels_toward(wheel_targets, dt)
+
         self.wheel_pub.publish(Float64MultiArray(data=self.sent_speeds))
         self.steer_pub.publish(Float64MultiArray(data=self.sent_angles))
+
+    def _move_steering_toward(self, targets, dt):
+        maximum_step = self.configuration["max_steering_rate"] * dt
+        for module_index, target in enumerate(targets):
+            error = target - self.sent_angles[module_index]
+            step = max(-maximum_step, min(maximum_step, error))
+            self.sent_angles[module_index] += step
+
+    def _move_wheels_toward(self, targets, dt):
+        speed_scale = max(
+            1.0,
+            max(abs(value) for value in targets)
+            / self.configuration["max_wheel_speed"],
+        )
+        maximum_step = self.configuration["max_wheel_acceleration"] * dt
+        for module_index, target in enumerate(targets):
+            limited_target = target / speed_scale
+            error = limited_target - self.sent_speeds[module_index]
+            step = max(-maximum_step, min(maximum_step, error))
+            self.sent_speeds[module_index] += step
 
     def on_feedback(self, msg):
         try:

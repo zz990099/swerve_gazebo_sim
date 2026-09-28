@@ -13,6 +13,7 @@ from geometry_msgs.msg import TwistStamped
 from nav_msgs.msg import Odometry
 from rclpy.node import Node
 from rclpy.parameter import Parameter
+from sensor_msgs.msg import JointState
 from tf2_ros import Buffer, TransformListener
 
 
@@ -54,6 +55,7 @@ class Probe(Node):
         self.odom = None
         self.peer = None
         self.peer_odom = None
+        self.joint_state = None
         self.tf_buffer = Buffer(node=self)
         self.tf_listener = TransformListener(self.tf_buffer, self)
         self.publisher = self.create_publisher(TwistStamped, "cmd_vel", 10)
@@ -62,6 +64,12 @@ class Probe(Node):
         )
         self.create_subscription(
             Odometry, "odom", lambda msg: setattr(self, "odom", msg), 10
+        )
+        self.create_subscription(
+            JointState,
+            "joint_states",
+            lambda msg: setattr(self, "joint_state", msg),
+            10,
         )
         if peer:
             self.create_subscription(
@@ -124,11 +132,14 @@ def main():
         while (
             node.truth is None
             or node.odom is None
+            or node.joint_state is None
             or (args.stationary_peer and (node.peer is None or node.peer_odom is None))
         ):
             rclpy.spin_once(node, timeout_sec=0.1)
             if time.monotonic() > deadline:
-                raise AssertionError("Missing wheel odometry or Gazebo ground truth")
+                raise AssertionError(
+                    "Missing joint state, wheel odometry or Gazebo ground truth"
+                )
         node.run_for(2, (0.0, 0.0, 0.0))
         prefix = (
             args.namespace.strip("/").replace("/", "_") + "_" if args.namespace else ""
@@ -178,6 +189,23 @@ def main():
         stopped = node.run_for(2, None)
         print(f"timeout_stop: measured={stopped}", flush=True)
         assert all(abs(v) < 0.03 for v in stopped), "Watchdog failed to stop chassis"
+
+        steering_names = [
+            f"{prefix}{corner}_steering_joint" for corner in ("fl", "fr", "rl", "rr")
+        ]
+        steering_positions = {
+            name: node.joint_state.position[index]
+            for index, name in enumerate(node.joint_state.name)
+            if name in steering_names
+        }
+        assert set(steering_positions) == set(steering_names)
+        assert all(
+            abs(steering_positions[name]) < 0.05 for name in steering_names
+        ), "Steering did not return home after command timeout"
+        print(
+            f"timeout_steering={steering_positions}",
+            flush=True,
+        )
         if peer_start is not None:
             delta = relative(peer_start, pose(node.peer))
             print(f"stationary_peer_delta={delta}", flush=True)

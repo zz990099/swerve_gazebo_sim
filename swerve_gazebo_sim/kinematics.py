@@ -1,8 +1,34 @@
 # SPDX-License-Identifier: Apache-2.0
 """Planar rigid-body kinematics. Wheel order is FL, FR, RL, RR."""
 import math
+from enum import Enum
 
 import numpy as np
+
+
+class DriveMode(Enum):
+    STOP = "stop"
+    DIFFERENTIAL = "differential"
+    CRAB = "crab"
+    SPIN = "spin"
+    SWERVE = "swerve"
+
+
+def select_drive_mode(vx, vy, wz, zero_tolerance=1e-6):
+    """Classify a body command into one explicit chassis mode."""
+    x_is_zero = abs(vx) <= zero_tolerance
+    y_is_zero = abs(vy) <= zero_tolerance
+    yaw_is_zero = abs(wz) <= zero_tolerance
+
+    if x_is_zero and y_is_zero and yaw_is_zero:
+        return DriveMode.STOP
+    if x_is_zero and y_is_zero:
+        return DriveMode.SPIN
+    if y_is_zero and yaw_is_zero:
+        return DriveMode.DIFFERENTIAL
+    if yaw_is_zero:
+        return DriveMode.CRAB
+    return DriveMode.SWERVE
 
 
 class SwerveKinematics:
@@ -26,6 +52,25 @@ class SwerveKinematics:
         for x, y in self.positions:
             matrix.extend(((1.0, 0.0, -y), (0.0, 1.0, x)))
         self._inverse = np.linalg.pinv(np.array(matrix))
+
+    def commands_for_motion(self, vx, vy, wz, current_angles):
+        """Return drive mode, wheel speeds and steering targets for a command."""
+        mode = select_drive_mode(vx, vy, wz)
+
+        if mode is DriveMode.STOP:
+            return mode, [0.0] * 4, [0.0] * 4
+
+        if mode is DriveMode.DIFFERENTIAL:
+            wheel_speeds = [vx / self.radius] * 4
+            return mode, wheel_speeds, [0.0] * 4
+
+        wheel_speeds, steering_targets = self.inverse(
+            vx,
+            vy,
+            wz,
+            current_angles,
+        )
+        return mode, wheel_speeds, steering_targets
 
     def inverse(self, vx, vy, wz, current_angles):
         if len(current_angles) != 4 or not all(
