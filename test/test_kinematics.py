@@ -57,12 +57,12 @@ def test_zero_preserves_angles(model):
 @pytest.mark.parametrize(
     ("twist", "expected_mode"),
     [
-        ((0.0, 0.0, 0.0), DriveMode.STOP),
+        ((0.0, 0.0, 0.0), None),
         ((0.4, 0.0, 0.0), DriveMode.DIFFERENTIAL),
-        ((0.4, 0.0, 0.2), DriveMode.SWERVE),
+        ((0.4, 0.0, 0.2), DriveMode.DIFFERENTIAL),
         ((0.0, 0.4, 0.0), DriveMode.CRAB),
         ((0.0, 0.0, 0.2), DriveMode.SPIN),
-        ((0.3, 0.2, 0.1), DriveMode.SWERVE),
+        ((0.3, 0.2, 0.1), None),
     ],
 )
 def test_drive_mode_selection(twist, expected_mode):
@@ -73,13 +73,13 @@ def test_differential_mode_keeps_steering_at_zero(model):
     mode, wheel_speeds, steering_targets = model.commands_for_motion(
         0.4,
         0.0,
-        0.0,
+        0.2,
         [0.5] * 4,
     )
 
     assert mode is DriveMode.DIFFERENTIAL
     assert steering_targets == [0.0] * 4
-    assert wheel_speeds == pytest.approx([4.0] * 4)
+    assert wheel_speeds == pytest.approx([3.5, 4.5, 3.5, 4.5])
 
 
 def test_stop_mode_returns_zero_commands(model):
@@ -90,7 +90,20 @@ def test_stop_mode_returns_zero_commands(model):
         [0.5] * 4,
     )
 
-    assert mode is DriveMode.STOP
+    assert mode is None
+    assert wheel_speeds == [0.0] * 4
+    assert steering_targets == [0.0] * 4
+
+
+def test_lateral_translation_with_yaw_is_unsupported(model):
+    mode, wheel_speeds, steering_targets = model.commands_for_motion(
+        0.3,
+        0.2,
+        0.1,
+        [0.0] * 4,
+    )
+
+    assert mode is None
     assert wheel_speeds == [0.0] * 4
     assert steering_targets == [0.0] * 4
 
@@ -101,6 +114,12 @@ def test_encoder_yaw_estimate(model):
     speeds = [math.hypot(x, y) / 0.1 for x, y in vectors]
     angles = [math.atan2(y, x) for x, y in vectors]
     assert model.forward(speeds, angles) == pytest.approx((0, 0, 1))
+
+
+def test_differential_encoder_estimate(model):
+    assert model.forward_differential([2.5, 3.5, 2.5, 3.5]) == pytest.approx(
+        (0.3, 0.0, 0.2)
+    )
 
 
 def test_arc_integration():

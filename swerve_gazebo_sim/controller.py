@@ -64,7 +64,8 @@ class SwerveController(Node):
         self.angles = [0.0] * 4
         self.sent_angles = [0.0] * 4
         self.sent_speeds = [0.0] * 4
-        self.requested_mode = DriveMode.STOP
+        self.requested_mode = None
+        self.active_mode = None
         self.steering_is_aligned = True
         self.pose = (0.0, 0.0, 0.0)
         self.previous_odom_stamp = None
@@ -129,7 +130,7 @@ class SwerveController(Node):
                 self.angles,
             )
         else:
-            mode = DriveMode.STOP
+            mode = None
             wheel_targets = [0.0] * 4
             steering_targets = [0.0] * 4
 
@@ -140,8 +141,20 @@ class SwerveController(Node):
             for target, measured in zip(steering_targets, self.angles)
         )
 
-        if mode is DriveMode.STOP or not self.steering_is_aligned:
-            # Stop immediately while steering returns home or changes mode.
+        if mode is None:
+            self.active_mode = None
+            self.sent_speeds = [0.0] * 4
+        elif mode is not self.active_mode:
+            # A mode transition keeps drive stopped until steering is aligned.
+            self.sent_speeds = [0.0] * 4
+            if self.steering_is_aligned:
+                self.active_mode = mode
+                self._move_wheels_toward(wheel_targets, dt)
+        elif mode is DriveMode.DIFFERENTIAL:
+            # Differential mode only gates entry. Steering remains commanded home,
+            # but feedback error does not interrupt an active maneuver.
+            self._move_wheels_toward(wheel_targets, dt)
+        elif not self.steering_is_aligned:
             self.sent_speeds = [0.0] * 4
         else:
             self._move_wheels_toward(wheel_targets, dt)
@@ -177,7 +190,10 @@ class SwerveController(Node):
             ]
             speeds = [msg.velocity[index] for index in wheel_indices]
             angles = [msg.position[index] for index in steering_indices]
-            twist = self.kinematics.forward(speeds, angles)
+            if self.active_mode is DriveMode.DIFFERENTIAL:
+                twist = self.kinematics.forward_differential(speeds)
+            else:
+                twist = self.kinematics.forward(speeds, angles)
         except (ValueError, IndexError):
             return
         now = self.get_clock().now().nanoseconds * 1e-9

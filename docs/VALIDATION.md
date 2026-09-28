@@ -42,8 +42,10 @@ motion checks had completed. The temporary test container exited successfully.
 
 Acceptance limits used by the physical smoke test: steady velocity errors below
 0.08 m/s in x/y and 0.12 rad/s in yaw; segment encoder pose error below 0.25 m and
-0.20 rad; stopped velocities below 0.03 m/s or rad/s. ROS samples arrive
-asynchronously, so these are functional regression checks, not precision metrology.
+0.20 rad; stopped velocities below 0.03 m/s or rad/s. Differential turning permits
+0.40 m planar error because wheel encoders cannot observe its lateral tire slip.
+ROS samples arrive asynchronously, so these are functional regression checks, not
+precision metrology.
 
 The observed pure-spin rate is about 6.8% above the requested rate in this model;
 encoder yaw differs from physical yaw by up to about 0.17 rad during a six-second
@@ -106,3 +108,20 @@ swerve motion. After command timeout, the largest measured chassis velocity was
 0.00023 rad/s and the largest steering-joint offset was 0.0000046 rad. This run
 therefore verified both chassis stopping and steering return-to-home behavior in
 simulation. Black formatting, Ruff checks and Git whitespace checks also passed.
+
+## Three-mode control validation (2026-09-28)
+
+The controller now exposes differential, spin and crab as its three motion modes.
+Differential mode accepts `vx + wz`, waits for zero steering on entry and does not
+reapply the steering interlock while active. Unit tests inject steering error during
+an active differential maneuver and verify that drive commands continue. Combined
+lateral translation and yaw is rejected with a stop command.
+
+The wheel model uses 1.0 rolling friction and 0.2 lateral friction, with the primary
+friction direction fixed to the wheel's local rolling axis. In the Fortress physical
+test, a `(0.25, 0.0, 0.2)` differential command produced approximately
+`(0.250, -0.055, 0.182)`. Differential wheel odometry cannot observe the lateral
+slip, so this segment uses a 0.40 m planar-error limit; all other segments retain the
+0.25 m limit. The final isolated build reported 54 tests with no failures. The final
+physical run passed forward, reverse, crab in both directions, spin in both
+directions, differential turning, timeout stopping and steering return-to-home.

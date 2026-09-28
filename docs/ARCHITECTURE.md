@@ -45,17 +45,28 @@ a large steering transition. The controller holds all drive wheels at zero until
 every measured steering angle reaches its target within the configured tolerance.
 This is a finite steering chassis, not a continuously rotating steering model.
 
-Commands are classified as stop, differential, spin, crab or combined swerve.
-Differential mode handles longitudinal translation and fixes all steering targets
-at zero. Spin uses the four-wheel X pattern. Crab keeps all modules parallel.
-Commands that combine translation and yaw use swerve kinematics. Stopping or a
-command timeout immediately zeros drive speed and returns all steering targets to
-zero. The same alignment interlock runs on every mode transition.
+The three motion modes are differential, spin and crab. Differential mode accepts
+`vx + wz` with `vy = 0`, fixes all steering targets at zero and varies left/right
+wheel speed. Spin accepts pure `wz` and uses the four-wheel X pattern. Crab accepts
+translation with `wz = 0` and keeps all modules parallel. Lateral translation plus
+yaw is unsupported and produces a stop command.
 
-For odometry, each measured wheel velocity is projected along its measured steering
-angle. The eight planar components form an overdetermined linear system for the
-three body velocities. Its least-squares solution assumes no lateral slip at each
-wheel. Gazebo ground truth is never used in that estimator or in the controller.
+Every mode transition keeps drive speed at zero until all measured steering angles
+reach the new targets. Once differential mode is active, steering error no longer
+gates drive speed; the position controller continues commanding zero steering.
+Spin and crab retain their alignment checks while active. Stopping or command
+timeout immediately zeros drive speed and returns all steering targets to zero.
+Wheel contact defines its primary friction direction along the wheel's local rolling
+axis. Lower lateral friction permits the tire slip required by differential yaw;
+the direction rotates with the steering link for spin and crab motion.
+
+Differential odometry computes longitudinal and yaw velocity from the measured
+left/right wheel-speed averages and track width. For spin and crab, each measured
+wheel velocity is projected along its measured steering angle. The eight planar
+components form an overdetermined linear system for the three body velocities.
+Gazebo ground truth is never used in either estimator or in the controller.
+Differential wheel odometry cannot measure the lateral component introduced by
+tire slip, so its integrated planar position drifts more during a turn.
 
 `swerve_drive.urdf.xacro` assembles `chassis.urdf.xacro` and
 `plugins.urdf.xacro`. The chassis file contains only the physical link and joint

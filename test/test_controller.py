@@ -124,7 +124,7 @@ def test_crab_waits_for_steering_alignment(node):
 def test_differential_waits_until_steering_returns_home(node):
     feedback(node, steering_angles=[0.7] * 4)
     node.sent_angles = [0.7] * 4
-    command(node, x=0.4)
+    command(node, x=0.3, yaw=0.2)
 
     assert tick(node, period=0.1) == [0.0] * 4
     assert node.requested_mode is DriveMode.DIFFERENTIAL
@@ -132,7 +132,20 @@ def test_differential_waits_until_steering_returns_home(node):
 
     wheel_speeds = settle_steering(node)
     assert node.sent_angles == pytest.approx([0.0] * 4)
-    assert wheel_speeds == pytest.approx([4.0] * 4)
+    assert wheel_speeds == pytest.approx([2.5, 3.5, 2.5, 3.5])
+
+
+def test_active_differential_mode_does_not_reapply_steering_interlock(node):
+    feedback(node)
+    command(node, x=0.3, yaw=0.2)
+    assert tick(node, period=0.1) == pytest.approx([2.5, 3.5, 2.5, 3.5])
+    assert node.active_mode is DriveMode.DIFFERENTIAL
+
+    feedback(node, steering_angles=[0.2] * 4)
+    wheel_speeds = tick(node, period=0.1)
+
+    assert not node.steering_is_aligned
+    assert wheel_speeds == pytest.approx([2.5, 3.5, 2.5, 3.5])
 
 
 def test_direct_crab_to_spin_switch_stops_drive_until_realigned(node):
@@ -157,7 +170,8 @@ def test_explicit_stop_returns_crab_steering_home(node):
 
     command(node, x=0.0)
     assert tick(node, period=0.1) == [0.0] * 4
-    assert node.requested_mode is DriveMode.STOP
+    assert node.requested_mode is None
+    assert node.active_mode is None
 
     for _ in range(10):
         tick(node, period=0.1)
@@ -191,6 +205,16 @@ def test_encoder_rotation_is_published(node):
     assert result.twist.twist.angular.z == pytest.approx(1)
     assert result.header.frame_id == "odom"
     assert result.child_frame_id == "base_footprint"
+
+
+def test_differential_encoder_velocity_is_published(node):
+    node.active_mode = DriveMode.DIFFERENTIAL
+    feedback(node, wheel_speeds=[2.5, 3.5, 2.5, 3.5])
+
+    result = node.odom_pub.messages[-1]
+    assert result.twist.twist.linear.x == pytest.approx(0.3)
+    assert result.twist.twist.linear.y == pytest.approx(0.0)
+    assert result.twist.twist.angular.z == pytest.approx(0.2)
 
 
 @pytest.mark.parametrize("kind", ["expired", "future", "wrong_frame"])

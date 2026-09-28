@@ -7,11 +7,9 @@ import numpy as np
 
 
 class DriveMode(Enum):
-    STOP = "stop"
     DIFFERENTIAL = "differential"
     CRAB = "crab"
     SPIN = "spin"
-    SWERVE = "swerve"
 
 
 def select_drive_mode(vx, vy, wz, zero_tolerance=1e-6):
@@ -21,14 +19,14 @@ def select_drive_mode(vx, vy, wz, zero_tolerance=1e-6):
     yaw_is_zero = abs(wz) <= zero_tolerance
 
     if x_is_zero and y_is_zero and yaw_is_zero:
-        return DriveMode.STOP
+        return None
     if x_is_zero and y_is_zero:
         return DriveMode.SPIN
-    if y_is_zero and yaw_is_zero:
+    if y_is_zero:
         return DriveMode.DIFFERENTIAL
     if yaw_is_zero:
         return DriveMode.CRAB
-    return DriveMode.SWERVE
+    return None
 
 
 class SwerveKinematics:
@@ -42,6 +40,7 @@ class SwerveKinematics:
             raise ValueError("This release supports steering limits of +/- pi/2")
         self.radius = wheel_radius
         self.limit = steering_limit
+        self.track_width = track_width
         self.positions = (
             (wheelbase / 2, track_width / 2),
             (wheelbase / 2, -track_width / 2),
@@ -57,12 +56,18 @@ class SwerveKinematics:
         """Return drive mode, wheel speeds and steering targets for a command."""
         mode = select_drive_mode(vx, vy, wz)
 
-        if mode is DriveMode.STOP:
+        if mode is None:
             return mode, [0.0] * 4, [0.0] * 4
 
         if mode is DriveMode.DIFFERENTIAL:
-            wheel_speeds = [vx / self.radius] * 4
+            wheel_speeds = [(vx - wz * y) / self.radius for _, y in self.positions]
             return mode, wheel_speeds, [0.0] * 4
+
+        if mode is DriveMode.CRAB:
+            wz = 0.0
+        elif mode is DriveMode.SPIN:
+            vx = 0.0
+            vy = 0.0
 
         wheel_speeds, steering_targets = self.inverse(
             vx,
@@ -112,6 +117,20 @@ class SwerveKinematics:
                 )
             )
         return tuple(float(v) for v in self._inverse @ np.array(velocities))
+
+    def forward_differential(self, wheel_speeds):
+        """Estimate body velocity from zero-steering left/right wheel speeds."""
+        if len(wheel_speeds) != 4 or not all(
+            math.isfinite(value) for value in wheel_speeds
+        ):
+            raise ValueError("Expected four finite wheel speeds")
+        left_speed = self.radius * (wheel_speeds[0] + wheel_speeds[2]) / 2
+        right_speed = self.radius * (wheel_speeds[1] + wheel_speeds[3]) / 2
+        return (
+            (left_speed + right_speed) / 2,
+            0.0,
+            (right_speed - left_speed) / self.track_width,
+        )
 
 
 def integrate_pose(pose, twist, dt):

@@ -98,7 +98,12 @@ def test_public_model_combines_chassis_and_plugins(
     root = ET.fromstring(xacro.process_file(str(model), mappings=mappings).toxml())
     assert len([j for j in root.findall("joint") if j.get("type") != "fixed"]) == 8
     assert len(root.findall(".//ros2_control")) == 1
-    assert len(root.findall(".//gazebo[@reference]")) == 4
+    wheel_contacts = root.findall(".//gazebo[@reference]")
+    assert len(wheel_contacts) == 4
+    for contact in wheel_contacts:
+        assert contact.find("mu1").text == "1.0"
+        assert contact.find("mu2").text == "0.2"
+        assert contact.find("fdir1").text == "1 0 0"
     assert len(root.findall(".//gazebo/plugin")) == 1
     assert root.find(".//gazebo/plugin/parameters").text == "/tmp/controllers.yaml"
     assert root.find(".//gazebo/plugin/ros/namespace").text == "/robot1"
