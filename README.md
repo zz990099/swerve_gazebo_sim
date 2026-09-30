@@ -11,10 +11,10 @@ Lateral translation combined with yaw is deliberately unsupported.
 
 The launch interface has two explicit Gazebo families:
 
-- `gazebo_version:=ign` selects Gazebo Fortress (Gazebo Sim 6),
+- `demo_ign.launch.py` / `spawn_ign.launch.py` selects Gazebo Fortress (Gazebo Sim 6),
   `ignition.msgs.*` bridge types and `ignition-gazebo-*` system plugins. This is
-  the default and is validated with Ubuntu 22.04 and ROS 2 Humble.
-- `gazebo_version:=gz` selects Gazebo Harmonic (Gazebo Sim 8), `gz.msgs.*`
+  validated with Ubuntu 22.04 and ROS 2 Humble.
+- `demo_gz.launch.py` / `spawn_gz.launch.py` selects Gazebo Harmonic (Gazebo Sim 8), `gz.msgs.*`
   bridge types and `gz-sim-*` system plugins. It is intended for a matching
   ROS 2 Jazzy / Harmonic installation.
 
@@ -29,13 +29,13 @@ source /opt/ros/humble/setup.bash
 rosdep install --from-paths src --ignore-src -r -y
 colcon build --packages-select swerve_gazebo_sim
 source install/setup.bash
-ros2 launch swerve_gazebo_sim demo.launch.py
+ros2 launch swerve_gazebo_sim demo_ign.launch.py
 ```
 
 For Harmonic:
 
 ```bash
-ros2 launch swerve_gazebo_sim demo.launch.py gazebo_version:=gz
+ros2 launch swerve_gazebo_sim demo_gz.launch.py
 ```
 
 Headless simulation: add `headless:=true`. Use this mode for automated tests and
@@ -48,8 +48,8 @@ This provides two physics steps per 100 Hz controller update and avoids publishi
 simulation clock updates at the previous 1000 Hz rate. The supplied world requires
 no downloads. When `world` is empty, the demo selects `empty_ign.sdf` or
 `empty_gz.sdf` for the requested family. For an existing world with the Physics and
-UserCommands systems and one `/clock` bridge, use `spawn.launch.py
-world_name:=YOUR_WORLD` and pass the same `gazebo_version` used to start that world.
+UserCommands systems and one `/clock` bridge, use `spawn_ign.launch.py` or
+`spawn_gz.launch.py` with `world_name:=YOUR_WORLD`, matching that world's version.
 
 ## Drive the chassis
 
@@ -109,26 +109,28 @@ The URDF has three focused files:
 - `urdf/swerve_drive.urdf.xacro` is the complete model used by launch and other consumers. It loads the same `swerve.yaml` file, so dimensions and limits do not need separate Xacro arguments.
 
 The complete model accepts `config_file`, `gazebo_version`, `prefix`, `namespace`,
-`controllers_file` and `publish_ground_truth`. The launch file supplies these
-values. Bridge definitions are kept in `config/clock_bridge_*.yaml` and
+`controllers_file` and `publish_ground_truth`. The fixed-version launch entry point
+supplies these values; there is no runtime Gazebo-version launch argument.
+Bridge definitions are kept in `config/clock_bridge_*.yaml` and
 `config/robot_bridge_*.yaml`; launch files only select the configuration that
 matches the requested Gazebo family.
 
 ```bash
-ros2 launch swerve_gazebo_sim demo.launch.py namespace:=robot1 robot_name:=robot1
+ros2 launch swerve_gazebo_sim demo_ign.launch.py namespace:=robot1 robot_name:=robot1
 # In a second sourced terminal, reuse the running world and its clock:
-ros2 launch swerve_gazebo_sim spawn.launch.py namespace:=robot2 robot_name:=robot2 x:=2
+ros2 launch swerve_gazebo_sim spawn_ign.launch.py namespace:=robot2 robot_name:=robot2 x:=2
 ```
 
 Robot 1 uses `/robot1/cmd_vel`, `/robot1/odom`, its own controller manager and
 `robot1_base_footprint` etc. `prefix:=auto` derives link, joint and frame names
 from the namespace; override it explicitly if needed. Use a unique `robot_name`,
 namespace and prefix for each robot. The clock bridge belongs to the world and
-is started once by `demo.launch.py`, never by `spawn.launch.py`.
+is started once by `demo_ign.launch.py`, never by `spawn_ign.launch.py`.
 
-Launch also accepts `gazebo_version`, `x`, `y`, `z`, `yaw`, `world_name` and
-`publish_ground_truth`. `demo.launch.py` additionally accepts `headless` and an
-absolute `world` SDF path.
+Launch also accepts `x`, `y`, `z`, `yaw`, `world_name` and
+`publish_ground_truth`. Both demo entry points additionally accept `headless` and an
+absolute `world` SDF path. The generic `spawn.launch.py` and `demo.launch.py`
+entry points have been removed; choose the matching suffixed entry point.
 Spawning and controller activation are sequenced by process completion, with a
 60-second controller-manager timeout. The controller configuration generated for
 each namespace lives in a temporary file and is removed when launch shuts down.

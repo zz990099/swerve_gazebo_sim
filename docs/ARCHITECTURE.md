@@ -71,7 +71,10 @@ tree; all Gazebo tags live in the plugins file. The public model takes a single
 configuration file argument, along with the names and paths needed to spawn it.
 The single YAML configuration supplies dimensions to both Xacro and kinematics.
 
-The launch interface selects one of two explicit Gazebo families. `ign` uses
+Four fixed launch entry points provide the two Gazebo families:
+`spawn_ign.launch.py`, `demo_ign.launch.py`, `spawn_gz.launch.py` and
+`demo_gz.launch.py`. They share startup mechanics in `launch_support.py`;
+no launch argument selects a family at runtime. `ign` uses
 Gazebo Sim 6, Ignition Transport message names and Ignition plugin names. `gz`
 uses Gazebo Sim 8, Gazebo Transport message names and `gz-sim` plugin names.
 Each family has a matching world and bridge YAML files. No runtime probing or

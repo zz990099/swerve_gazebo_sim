@@ -1,5 +1,6 @@
 # SPDX-License-Identifier: Apache-2.0
 """Configuration shared by launch and model validation tests."""
+
 import math
 import re
 
@@ -34,18 +35,26 @@ CONTROL = (
 
 GAZEBO_VARIANTS = {
     "ign": {
+        "name": "ign",
+        "spawn_launch": "spawn_ign.launch.py",
         "sim_version": "6",
         "world": "empty_ign.sdf",
         "clock_bridge": "clock_bridge_ign.yaml",
         "robot_bridge": "robot_bridge_ign.yaml",
     },
     "gz": {
+        "name": "gz",
+        "spawn_launch": "spawn_gz.launch.py",
         "sim_version": "8",
         "world": "empty_gz.sdf",
         "clock_bridge": "clock_bridge_gz.yaml",
         "robot_bridge": "robot_bridge_gz.yaml",
     },
 }
+
+
+IGNITION = GAZEBO_VARIANTS["ign"]
+HARMONIC = GAZEBO_VARIANTS["gz"]
 
 
 def gazebo_variant(name):

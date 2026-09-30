@@ -1,4 +1,4 @@
-"""Physical smoke test: run against demo.launch.py publish_ground_truth:=true.
+"""Physical smoke test: run against demo_ign.launch.py / demo_gz.launch.py publish_ground_truth:=true.
 
 Uses simulation time for segments and wall time only for bounded test deadlines.
 Requires a clear world; sends motion commands to the selected simulation robot.

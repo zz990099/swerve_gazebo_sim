@@ -25,6 +25,7 @@ if(BUILD_TESTING)
   ament_add_pytest_test(kinematics test/test_kinematics.py)
   ament_add_pytest_test(model test/test_model.py)
   ament_add_pytest_test(controller test/test_controller.py)
+  ament_add_pytest_test(launch test/test_launch.py)
 endif()
 
 ament_package()
