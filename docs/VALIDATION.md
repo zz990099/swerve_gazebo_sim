@@ -28,6 +28,19 @@ crab direction changes, noisy commands, timeout/reset and backwards clock resets
 Additional ROS adapter cases exercise measured braking and DiagnosticArray output.
 Those adapter cases and physical motions must run in the ROS CI matrix.
 
+## Continuous validation matrix (2026-09-30)
+
+`.github/workflows/ci.yaml` defines Humble/Fortress and Jazzy/Harmonic jobs using
+the Docker official `ros` base images. Each job installs public dependencies with
+rosdep, builds this package in an isolated workspace, runs all five pytest suites,
+then runs single-robot and two-robot physical tests. Physical tests cover diagonal
+crab, all six directed mode switches without intermediate stop commands, interrupted
+returns, timeout/home behavior, separate TF and controller namespaces, and a
+stationary peer. The runner has a bounded 300-second deadline and cleans up its
+launch processes. Actions uploads build, test-result and launch logs on failure
+as well as success. The workflow result for a commit is the evidence for that
+commit; adding the workflow alone does not assert that its jobs passed.
+
 ## Original validation (2026-09-25)
 
 Date: 2026-09-25.

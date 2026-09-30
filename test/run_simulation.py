@@ -64,7 +64,7 @@ def main():
         critical = list(processes)
         result = subprocess.Popen(probe, start_new_session=True)
         processes.append(result)
-        deadline = time.monotonic() + 180
+        deadline = time.monotonic() + 300
         while (
             result.poll() is None
             and all(process.poll() is None for process in critical)

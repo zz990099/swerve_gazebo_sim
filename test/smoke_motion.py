@@ -9,6 +9,7 @@ import math
 import time
 
 import rclpy
+from diagnostic_msgs.msg import DiagnosticArray, DiagnosticStatus
 from geometry_msgs.msg import TwistStamped
 from nav_msgs.msg import Odometry
 from rclpy.node import Node
@@ -56,6 +57,7 @@ class Probe(Node):
         self.peer = None
         self.peer_odom = None
         self.joint_state = None
+        self.drive_status = None
         self.tf_buffer = Buffer(node=self)
         self.tf_listener = TransformListener(self.tf_buffer, self)
         self.publisher = self.create_publisher(TwistStamped, "cmd_vel", 10)
@@ -69,6 +71,12 @@ class Probe(Node):
             JointState,
             "joint_states",
             lambda msg: setattr(self, "joint_state", msg),
+            10,
+        )
+        self.create_subscription(
+            DiagnosticArray,
+            "drive_status",
+            lambda msg: setattr(self, "drive_status", msg),
             10,
         )
         if peer:
@@ -100,6 +108,11 @@ class Probe(Node):
                 self.publisher.publish(cmd)
             rclpy.spin_once(self, timeout_sec=0.02)
             now = self.get_clock().now().nanoseconds * 1e-9
+            if self.drive_status is not None:
+                assert all(
+                    status.level != DiagnosticStatus.ERROR
+                    for status in self.drive_status.status
+                ), "Controller transition fault"
             for msg in (self.truth, self.odom, self.peer, self.peer_odom):
                 if msg is not None:
                     stamp = msg.header.stamp.sec + msg.header.stamp.nanosec * 1e-9
@@ -133,6 +146,7 @@ def main():
             node.truth is None
             or node.odom is None
             or node.joint_state is None
+            or node.drive_status is None
             or (args.stationary_peer and (node.peer is None or node.peer_odom is None))
         ):
             rclpy.spin_once(node, timeout_sec=0.1)
@@ -161,6 +175,7 @@ def main():
             ("reverse", (-0.3, 0.0, 0.0)),
             ("left", (0.0, 0.25, 0.0)),
             ("right", (0.0, -0.25, 0.0)),
+            ("diagonal_crab", (0.2, 0.15, 0.0)),
             ("spin_ccw", (0.0, 0.0, 0.35)),
             ("spin_cw", (0.0, 0.0, -0.35)),
             ("differential_turn", (0.25, 0.0, 0.2)),
@@ -186,6 +201,45 @@ def main():
                 for a, b, limit in zip(measured, target, (0.08, 0.08, 0.12))
             ), name
             assert position_error < 0.25 and yaw_error < 0.2, name + " odometry"
+
+        modes = {
+            "differential": (0.25, 0.0, 0.2),
+            "crab": (0.2, 0.15, 0.0),
+            "spin": (0.0, 0.0, 0.35),
+        }
+        for first, source_command in modes.items():
+            for second, target_command in modes.items():
+                if first == second:
+                    continue
+                node.run_for(3, source_command)
+                # No zero command between modes: exercise actual direct switches.
+                measured = node.run_for(4, target_command)
+                assert all(
+                    abs(actual - target) < tolerance
+                    for actual, target, tolerance in zip(
+                        measured, target_command, (0.08, 0.08, 0.12)
+                    )
+                ), f"Direct transition {first} -> {second} failed"
+                values = {
+                    item.key: item.value for item in node.drive_status.status[0].values
+                }
+                assert values["active_mode"] == second
+                assert values["phase"] == "active"
+                print(
+                    f"direct_transition: {first} -> {second} measured={measured}",
+                    flush=True,
+                )
+
+        for pending in ("crab", "spin"):
+            node.run_for(3, (0.25, 0.0, 0.0))
+            node.run_for(0.25, modes[pending])
+            measured = node.run_for(3, (0.25, 0.0, 0.0))
+            assert abs(measured[0] - 0.25) < 0.08
+            assert abs(measured[1]) < 0.08 and abs(measured[2]) < 0.12
+            print(
+                f"interrupted_transition: {pending} -> differential passed", flush=True
+            )
+
         stopped = node.run_for(2, None)
         print(f"timeout_stop: measured={stopped}", flush=True)
         assert all(abs(v) < 0.03 for v in stopped), "Watchdog failed to stop chassis"

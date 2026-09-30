@@ -1,0 +1,114 @@
+name: ROS and Gazebo CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  style:
+    name: Python style
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install style tools
+        run: python -m pip install black==26.5.1 ruff==0.16.9
+      - name: Check formatting and lint
+        run: |
+          black --check --workers 1 swerve_gazebo_sim launch test
+          ruff check swerve_gazebo_sim launch test
+
+  simulation:
+    name: ${{ matrix.ros }} / ${{ matrix.gazebo }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - ros: humble
+            gazebo: Fortress
+            family: ign
+            image: ros:humble-ros-base-jammy
+          - ros: jazzy
+            gazebo: Harmonic
+            family: gz
+            image: ros:jazzy-ros-base-noble
+    container:
+      image: ${{ matrix.image }}
+    defaults:
+      run:
+        shell: bash
+    env:
+      DEBIAN_FRONTEND: noninteractive
+      ROS_DISTRO: ${{ matrix.ros }}
+      ROS_DOMAIN_ID: "71"
+      ROS_LOCALHOST_ONLY: "1"
+      GZ_PARTITION: swerve-${{ github.run_id }}-${{ matrix.ros }}
+      IGN_PARTITION: swerve-${{ github.run_id }}-${{ matrix.ros }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          path: workspace/src/swerve_gazebo_sim
+      - name: Install ROS and Gazebo dependencies
+        run: |
+          apt-get update
+          apt-get install --no-install-recommends -y \
+            build-essential cmake python3-colcon-common-extensions \
+            python3-rosdep python3-pytest \
+            "ros-${ROS_DISTRO}-ros-gz" "ros-${ROS_DISTRO}-gz-ros2-control"
+          if [[ ! -f /etc/ros/rosdep/sources.list.d/20-default.list ]]; then
+            rosdep init
+          fi
+          rosdep update --rosdistro "$ROS_DISTRO"
+          rosdep install --from-paths workspace/src --ignore-src -r -y \
+            --rosdistro "$ROS_DISTRO"
+      - name: Build isolated package
+        working-directory: workspace
+        run: |
+          source "/opt/ros/${ROS_DISTRO}/setup.bash"
+          colcon build --packages-select swerve_gazebo_sim \
+            --event-handlers console_direct+ --cmake-args -DBUILD_TESTING=ON
+      - name: Run unit, model and launch tests
+        working-directory: workspace
+        run: |
+          source "/opt/ros/${ROS_DISTRO}/setup.bash"
+          source install/setup.bash
+          colcon test --packages-select swerve_gazebo_sim \
+            --return-code-on-test-failure --event-handlers console_direct+
+          colcon test-result --verbose
+      - name: Single-robot physical motion and transition tests
+        working-directory: workspace
+        run: |
+          source "/opt/ros/${ROS_DISTRO}/setup.bash"
+          source install/setup.bash
+          python3 src/swerve_gazebo_sim/test/run_simulation.py \
+            --gazebo-version "${{ matrix.family }}" --logs artifacts/single
+      - name: Multi-robot spawn and namespace isolation
+        working-directory: workspace
+        run: |
+          source "/opt/ros/${ROS_DISTRO}/setup.bash"
+          source install/setup.bash
+          python3 src/swerve_gazebo_sim/test/run_simulation.py \
+            --gazebo-version "${{ matrix.family }}" --multi --logs artifacts/multi
+      - name: Upload build, test and simulation logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: validation-${{ matrix.ros }}-${{ matrix.family }}
+          path: |
+            workspace/log/
+            workspace/build/swerve_gazebo_sim/test_results/
+            workspace/artifacts/
+          if-no-files-found: warn

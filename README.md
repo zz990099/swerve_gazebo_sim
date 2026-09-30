@@ -217,6 +217,8 @@ its processes. Run it in a sourced workspace:
 ```bash
 python3 src/swerve_gazebo_sim/test/run_simulation.py
 python3 src/swerve_gazebo_sim/test/run_simulation.py --multi
+# In a Jazzy/Harmonic workspace:
+python3 src/swerve_gazebo_sim/test/run_simulation.py --gazebo-version gz
 ```
 
 Use a separate ROS domain / Gazebo transport partition if other simulations are
@@ -224,6 +226,21 @@ already running. The multi-robot check drives one robot while observing that a
 second robot stays still. To probe an already running demo, enable
 `publish_ground_truth:=true` and run `test/smoke_motion.py` directly.
 See `docs/VALIDATION.md` for the recorded environment and results.
+
+GitHub Actions runs the same checks on the two supported ROS/Gazebo pairs:
+
+| ROS | Gazebo | Docker official base image |
+|---|---|---|
+| Humble | Fortress | `ros:humble-ros-base-jammy` |
+| Jazzy | Harmonic | `ros:jazzy-ros-base-noble` |
+
+Every push to main and pull request runs formatting/lint, an isolated colcon
+build, all unit/model/launch tests, single-robot physical motions, six direct
+mode transitions, interrupted returns and a two-robot isolation test. Build,
+JUnit and simulation logs are uploaded even on failure. Simulations run headless
+with an isolated ROS domain and Gazebo transport partition. Other ROS releases
+are not automatically claimed supported: their default Gazebo versions may
+differ from the two families this package targets.
 
 ## Source and license
 
