@@ -95,13 +95,6 @@ jobs:
           source install/setup.bash
           python3 src/swerve_gazebo_sim/test/run_simulation.py \
             --gazebo-version "${{ matrix.family }}" --logs artifacts/single
-      - name: Multi-robot spawn and namespace isolation
-        working-directory: workspace
-        run: |
-          source "/opt/ros/${ROS_DISTRO}/setup.bash"
-          source install/setup.bash
-          python3 src/swerve_gazebo_sim/test/run_simulation.py \
-            --gazebo-version "${{ matrix.family }}" --multi --logs artifacts/multi
       - name: Upload build, test and simulation logs
         if: always()
         uses: actions/upload-artifact@v4

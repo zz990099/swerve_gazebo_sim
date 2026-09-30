@@ -33,10 +33,9 @@ Those adapter cases and physical motions must run in the ROS CI matrix.
 `.github/workflows/ci.yaml` defines Humble/Fortress and Jazzy/Harmonic jobs using
 the Docker official `ros` base images. Each job installs public dependencies with
 rosdep, builds this package in an isolated workspace, runs all six pytest suites,
-then runs single-robot and two-robot physical tests. Physical tests cover diagonal
+then runs single-robot physical tests. Physical tests cover diagonal
 crab, all six directed mode switches without intermediate stop commands, interrupted
-returns, timeout/home behavior, separate TF and controller namespaces, and a
-stationary peer. The runner has a bounded 300-second deadline and cleans up its
+returns and timeout/home behavior. The runner has a bounded 300-second deadline and cleans up its
 launch processes. Actions uploads build, test-result and launch logs on failure
 as well as success. The workflow result for a commit is the evidence for that
 commit; adding the workflow alone does not assert that its jobs passed.
@@ -49,6 +48,11 @@ tracks simulator descendants before launch can exit, then terminates any survivo
 A regression test covers a detached child that ignores SIGTERM after its launch
 parent exits. Local suites including runner tests passed 63 cases. This correction
 keeps the physical acceptance limits unchanged.
+
+The current acceptance scope is single-robot simulation. The multi-robot CI step
+has been removed at the user's request; it is not a required check. The two
+ROS/Gazebo jobs still exercise their fixed-version demo, physical motion modes,
+direct switches, interrupted returns and timeout stopping.
 
 ## Original validation (2026-09-25)
 

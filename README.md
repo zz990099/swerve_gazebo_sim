@@ -236,7 +236,7 @@ GitHub Actions runs the same checks on the two supported ROS/Gazebo pairs:
 
 Every push to main and pull request runs formatting/lint, an isolated colcon
 build, all unit/model/launch tests, single-robot physical motions, six direct
-mode transitions, interrupted returns and a two-robot isolation test. Build,
+mode transitions and interrupted returns. Build,
 JUnit and simulation logs are uploaded even on failure. Simulations run headless
 with an isolated ROS domain and Gazebo transport partition. Other ROS releases
 are not automatically claimed supported: their default Gazebo versions may
