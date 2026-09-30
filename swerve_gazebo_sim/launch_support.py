@@ -3,6 +3,7 @@
 
 import os
 import shlex
+import sys
 import tempfile
 from functools import partial
 
@@ -163,8 +164,9 @@ def spawn_setup(context, variant):
         }
     )
     swerve_controller = Node(
-        package=PACKAGE_NAME,
-        executable="swerve_controller",
+        executable=sys.executable,
+        arguments=["-m", "swerve_gazebo_sim.controller"],
+        exec_name="swerve_controller",
         namespace=namespace,
         output="screen",
         parameters=[controller_node_parameters],

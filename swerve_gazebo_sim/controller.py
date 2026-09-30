@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 # SPDX-License-Identifier: Apache-2.0
 """ROS adapter for bounded steering, wheel commands and encoder odometry."""
 

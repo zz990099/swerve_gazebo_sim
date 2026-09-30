@@ -25,6 +25,12 @@ simulation-time supervisor for hysteresis, measured-stop confirmation, stable
 alignment, transition deadlines and fault reset. `bringup.py` validates configuration
 and generates controller-manager parameters for each namespace.
 
+The spawn launch starts the controller as an independent Python module process
+after the model has spawned and the ros2_control controllers have activated.
+Launch manages its namespace, parameters and shutdown. The package installs no
+standalone controller executable; no scripts directory or `ros2 run` entry is
+required. Demo launch includes the corresponding spawn launch.
+
 The model uses x-forward, y-left and z-up. All wheel joint axes point along local
 +y, so positive wheel angular velocity means rolling forward at zero steering.
 Module order is front-left, front-right, rear-left, rear-right everywhere. Steering

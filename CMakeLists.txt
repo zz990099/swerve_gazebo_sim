@@ -7,11 +7,6 @@ find_package(ament_cmake_python REQUIRED)
 ament_python_install_package(${PROJECT_NAME})
 
 install(
-  PROGRAMS swerve_gazebo_sim/controller.py
-  DESTINATION lib/${PROJECT_NAME}
-  RENAME swerve_controller
-)
-install(
   DIRECTORY config launch urdf worlds docs
   DESTINATION share/${PROJECT_NAME}
 )
