@@ -234,8 +234,15 @@ def main():
             node.run_for(3, (0.25, 0.0, 0.0))
             node.run_for(0.25, modes[pending])
             measured = node.run_for(3, (0.25, 0.0, 0.0))
-            assert abs(measured[0] - 0.25) < 0.08
-            assert abs(measured[1]) < 0.08 and abs(measured[2]) < 0.12
+            print(
+                f"interrupted_transition: {pending} -> differential measured={measured} "
+                f"pose={pose(node.truth)}",
+                flush=True,
+            )
+            assert (
+                abs(measured[0] - 0.25) < 0.08
+            ), f"{pending} return x velocity: {measured}"
+            assert abs(measured[1]) < 0.08 and abs(measured[2]) < 0.12, measured
             print(
                 f"interrupted_transition: {pending} -> differential passed", flush=True
             )

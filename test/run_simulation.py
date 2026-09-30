@@ -7,7 +7,56 @@ import subprocess
 import sys
 import tempfile
 import time
+import uuid
 from pathlib import Path
+
+import psutil
+
+
+def simulation_environment(environment):
+    """Give each run its own transport services, even in a reused ROS workspace."""
+    result = dict(environment)
+    partition = (
+        result.get("GZ_PARTITION") or result.get("IGN_PARTITION") or "swerve_test"
+    )
+    partition += "_" + uuid.uuid4().hex
+    result["GZ_PARTITION"] = partition
+    result["IGN_PARTITION"] = partition
+    return result
+
+
+def track_descendants(processes, tracked):
+    for process in processes:
+        try:
+            for child in psutil.Process(process.pid).children(recursive=True):
+                tracked[(child.pid, child.create_time())] = child
+        except psutil.NoSuchProcess:
+            pass
+
+
+def stop_descendants(tracked):
+    """Launch exit does not prove its simulator grandchildren have exited."""
+    survivors = []
+    for child in tracked.values():
+        try:
+            if child.is_running() and child.status() != psutil.STATUS_ZOMBIE:
+                child.terminate()
+                survivors.append(child)
+        except psutil.NoSuchProcess:
+            pass
+    _, alive = psutil.wait_procs(survivors, timeout=3)
+    for child in alive:
+        try:
+            child.kill()
+        except psutil.NoSuchProcess:
+            pass
+    psutil.wait_procs(alive, timeout=3)
+    for child in alive:
+        try:
+            if child.is_running() and child.status() != psutil.STATUS_ZOMBIE:
+                raise RuntimeError(f"Simulation descendant {child.pid} did not exit")
+        except psutil.NoSuchProcess:
+            pass
 
 
 def main():
@@ -24,12 +73,19 @@ def main():
     directory.mkdir(parents=True, exist_ok=True)
     processes = []
     streams = []
+    descendants = {}
+    environment = simulation_environment(os.environ)
+    print(f"Gazebo partition: {environment['GZ_PARTITION']}", flush=True)
 
     def start(name, command):
         stream = (directory / name).open("w")
         streams.append(stream)
         process = subprocess.Popen(
-            command, stdout=stream, stderr=subprocess.STDOUT, start_new_session=True
+            command,
+            stdout=stream,
+            stderr=subprocess.STDOUT,
+            start_new_session=True,
+            env=environment,
         )
         processes.append(process)
 
@@ -62,7 +118,7 @@ def main():
             )
             probe += ["--namespace", "robot1", "--stationary-peer", "robot2"]
         critical = list(processes)
-        result = subprocess.Popen(probe, start_new_session=True)
+        result = subprocess.Popen(probe, start_new_session=True, env=environment)
         processes.append(result)
         deadline = time.monotonic() + 300
         while (
@@ -70,6 +126,7 @@ def main():
             and all(process.poll() is None for process in critical)
             and time.monotonic() < deadline
         ):
+            track_descendants(processes, descendants)
             time.sleep(0.1)
         returncode = result.poll()
         if returncode is None:
@@ -82,6 +139,7 @@ def main():
                     print(path.read_text()[-16000:])
         return returncode
     finally:
+        track_descendants(processes, descendants)
         for process in reversed(processes):
             if process.poll() is None:
                 # Let ros2 launch forward SIGINT once to its children.
@@ -92,6 +150,7 @@ def main():
             except subprocess.TimeoutExpired:
                 os.killpg(process.pid, signal.SIGKILL)
                 process.wait()
+        stop_descendants(descendants)
         for stream in streams:
             stream.close()
         print(f"Launch logs: {directory}", flush=True)
