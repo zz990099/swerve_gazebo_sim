@@ -283,7 +283,7 @@ class SwerveController(Node):
         if self.transform_broadcaster is not None:
             transform = TransformStamped()
             transform.header = odom.header
-            transform.child_frame_id = self.base_frame
+            transform.child_frame_id = self.odom_child_frame
             transform.transform.translation.x = self.pose[0]
             transform.transform.translation.y = self.pose[1]
             transform.transform.rotation = odom.pose.pose.orientation
