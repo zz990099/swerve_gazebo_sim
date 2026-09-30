@@ -1,5 +1,6 @@
 # SPDX-License-Identifier: Apache-2.0
 """ROS adapter for bounded steering, wheel commands and encoder odometry."""
+
 import math
 
 import rclpy
@@ -152,6 +153,9 @@ class SwerveController(Node):
             self.sent_speeds = [0.0] * 4
         elif mode is not self.active_mode:
             # A mode transition keeps drive stopped until steering is aligned.
+            # Invalidate the previous mode immediately: a command returning to it
+            # during alignment must pass that mode's entry interlock again.
+            self.active_mode = None
             self.sent_speeds = [0.0] * 4
             if self.steering_is_aligned:
                 self.active_mode = mode

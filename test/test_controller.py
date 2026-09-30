@@ -187,6 +187,49 @@ def test_explicit_stop_returns_crab_steering_home(node):
     assert node.sent_angles == pytest.approx([0.0] * 4)
 
 
+@pytest.mark.parametrize("intermediate", [(0.3, 0.3, 0.0), (0.0, 0.0, 0.5)])
+def test_interrupted_transition_back_to_differential_reapplies_home_gate(
+    node, intermediate
+):
+    feedback(node)
+    command(node, x=0.3)
+    assert min(tick(node, period=0.1)) > 0.0
+
+    command(node, *intermediate)
+    assert tick(node, period=0.1) == [0.0] * 4
+    assert node.active_mode is None
+    feedback(node, steering_angles=node.sent_angles)
+    assert max(abs(angle) for angle in node.angles) > 0.05
+
+    command(node, x=0.3)
+    assert tick(node, period=0.1) == [0.0] * 4
+    assert node.active_mode is None
+    assert min(settle_steering(node)) > 0.0
+    assert node.active_mode is DriveMode.DIFFERENTIAL
+
+
+@pytest.mark.parametrize(
+    ("first", "second"),
+    [
+        ((0.3, 0.0, 0.0), (0.0, 0.3, 0.0)),
+        ((0.3, 0.0, 0.0), (0.0, 0.0, 0.5)),
+        ((0.0, 0.3, 0.0), (0.3, 0.0, 0.0)),
+        ((0.0, 0.3, 0.0), (0.0, 0.0, 0.5)),
+        ((0.0, 0.0, 0.5), (0.3, 0.0, 0.0)),
+        ((0.0, 0.0, 0.5), (0.0, 0.3, 0.0)),
+    ],
+)
+def test_direct_mode_changes_hold_drive_until_alignment(node, first, second):
+    feedback(node)
+    command(node, *first)
+    assert any(settle_steering(node))
+    feedback(node, steering_angles=node.sent_angles)
+    command(node, *second)
+    assert tick(node, period=0.1) == [0.0] * 4
+    assert node.active_mode is None
+    assert any(settle_steering(node))
+
+
 @pytest.mark.parametrize("value", [float("nan"), float("inf")])
 def test_nonfinite_command_stops(node, value):
     feedback(node)
