@@ -1,4 +1,0 @@
-- topic_name: "ground_truth/odom"
-  ros_type_name: "nav_msgs/msg/Odometry"
-  gz_type_name: "ignition.msgs.Odometry"
-  direction: GZ_TO_ROS

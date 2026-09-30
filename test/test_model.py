@@ -8,6 +8,7 @@ import yaml
 
 from swerve_gazebo_sim.bringup import (
     TRANSITION_DEFAULTS,
+    bridge_config,
     controller_config,
     gazebo_variant,
     load_config,
@@ -129,27 +130,17 @@ def test_gazebo_variants_reference_version_specific_files():
     assert harmonic["sim_version"] == "8"
     assert (ROOT / "worlds" / ignition["world"]).is_file()
     assert (ROOT / "worlds" / harmonic["world"]).is_file()
-    assert (ROOT / "config" / ignition["clock_bridge"]).is_file()
-    assert (ROOT / "config" / harmonic["clock_bridge"]).is_file()
-    assert (ROOT / "config" / ignition["robot_bridge"]).is_file()
-    assert (ROOT / "config" / harmonic["robot_bridge"]).is_file()
-
-    ignition_clock_bridge = yaml.safe_load(
-        (ROOT / "config" / ignition["clock_bridge"]).read_text(encoding="utf-8")
-    )
-    harmonic_clock_bridge = yaml.safe_load(
-        (ROOT / "config" / harmonic["clock_bridge"]).read_text(encoding="utf-8")
-    )
-    ignition_robot_bridge = yaml.safe_load(
-        (ROOT / "config" / ignition["robot_bridge"]).read_text(encoding="utf-8")
-    )
-    harmonic_robot_bridge = yaml.safe_load(
-        (ROOT / "config" / harmonic["robot_bridge"]).read_text(encoding="utf-8")
-    )
-    assert ignition_clock_bridge[0]["gz_type_name"] == "ignition.msgs.Clock"
-    assert harmonic_clock_bridge[0]["gz_type_name"] == "gz.msgs.Clock"
-    assert ignition_robot_bridge[0]["gz_type_name"] == "ignition.msgs.Odometry"
-    assert harmonic_robot_bridge[0]["gz_type_name"] == "gz.msgs.Odometry"
+    for variant, message_prefix in ((ignition, "ignition"), (harmonic, "gz")):
+        bridge_file = ROOT / "config" / variant["bridge"]
+        combined = yaml.safe_load(bridge_file.read_text(encoding="utf-8"))
+        clock = bridge_config(bridge_file, "clock")
+        robot = bridge_config(bridge_file, "robot")
+        assert clock + robot == combined
+        assert len(clock) == len(robot) == 1
+        assert clock[0]["topic_name"] == "/clock"
+        assert clock[0]["gz_type_name"] == f"{message_prefix}.msgs.Clock"
+        assert robot[0]["topic_name"] == "ground_truth/odom"
+        assert robot[0]["gz_type_name"] == f"{message_prefix}.msgs.Odometry"
 
     ignition_world = ET.parse(ROOT / "worlds" / ignition["world"]).getroot()
     harmonic_world = ET.parse(ROOT / "worlds" / harmonic["world"]).getroot()

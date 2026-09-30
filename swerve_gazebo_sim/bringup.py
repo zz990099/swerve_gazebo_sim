@@ -60,16 +60,14 @@ GAZEBO_VARIANTS = {
         "spawn_launch": "spawn_ign.launch.py",
         "sim_version": "6",
         "world": "empty_ign.sdf",
-        "clock_bridge": "clock_bridge_ign.yaml",
-        "robot_bridge": "robot_bridge_ign.yaml",
+        "bridge": "bridge_ign.yaml",
     },
     "gz": {
         "name": "gz",
         "spawn_launch": "spawn_gz.launch.py",
         "sim_version": "8",
         "world": "empty_gz.sdf",
-        "clock_bridge": "clock_bridge_gz.yaml",
-        "robot_bridge": "robot_bridge_gz.yaml",
+        "bridge": "bridge_gz.yaml",
     },
 }
 
@@ -128,6 +126,19 @@ def load_config(path):
     if geometry["wheelbase"] <= 2 * geometry["wheel_radius"]:
         raise ValueError("wheelbase must exceed the wheel diameter")
     return cfg
+
+
+def bridge_config(path, scope):
+    """Select global clock or robot topics from one standard bridge YAML file."""
+    if scope not in ("clock", "robot"):
+        raise ValueError("Bridge scope must be clock or robot")
+    with open(path, encoding="utf-8") as stream:
+        bridges = yaml.safe_load(stream)
+    return [
+        entry
+        for entry in bridges
+        if (entry["topic_name"] == "/clock") == (scope == "clock")
+    ]
 
 
 def names(namespace, robot_name, prefix):

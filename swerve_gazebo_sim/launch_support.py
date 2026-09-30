@@ -26,9 +26,44 @@ from launch_ros.actions import Node
 
 from launch import LaunchDescription
 
-from .bringup import controller_config, load_config, names
+from .bringup import bridge_config, controller_config, load_config, names
 
 PACKAGE_NAME = "swerve_gazebo_sim"
+
+
+def bridge_actions(package_share, variant, scope, namespace=""):
+    """Keep one bridge source while starting clock and robot topics separately."""
+    source = os.path.join(package_share, "config", variant["bridge"])
+    entries = bridge_config(source, scope)
+    with tempfile.NamedTemporaryFile(
+        mode="w", prefix=f"swerve_{scope}_bridge_", suffix=".yaml", delete=False
+    ) as stream:
+        yaml.safe_dump(entries, stream)
+        config_file = stream.name
+
+    def remove_temporary_bridge_file(event, launch_context):
+        del event, launch_context
+        if os.path.exists(config_file):
+            os.unlink(config_file)
+        return []
+
+    parameters = {"config_file": config_file}
+    options = {}
+    if scope == "robot":
+        parameters.update(expand_gz_topic_names=True, use_sim_time=True)
+        options["condition"] = IfCondition(LaunchConfiguration("publish_ground_truth"))
+    return [
+        RegisterEventHandler(OnShutdown(on_shutdown=remove_temporary_bridge_file)),
+        Node(
+            package="ros_gz_bridge",
+            executable="parameter_bridge",
+            name="clock_bridge" if scope == "clock" else "ground_truth_bridge",
+            namespace=namespace,
+            output="screen",
+            parameters=[parameters],
+            **options,
+        ),
+    ]
 
 
 def spawn_setup(context, variant):
@@ -172,25 +207,7 @@ def spawn_setup(context, variant):
         parameters=[controller_node_parameters],
     )
 
-    robot_bridge_config = os.path.join(
-        package_share,
-        "config",
-        version["robot_bridge"],
-    )
-    ground_truth_bridge_parameters = {
-        "config_file": robot_bridge_config,
-        "expand_gz_topic_names": True,
-        "use_sim_time": True,
-    }
-    ground_truth_bridge = Node(
-        package="ros_gz_bridge",
-        executable="parameter_bridge",
-        name="ground_truth_bridge",
-        namespace=namespace,
-        output="screen",
-        condition=IfCondition(LaunchConfiguration("publish_ground_truth")),
-        parameters=[ground_truth_bridge_parameters],
-    )
+    ground_truth_bridge = bridge_actions(package_share, version, "robot", namespace)
 
     def start_controllers_after_spawn(event, launch_context):
         del launch_context
@@ -225,7 +242,7 @@ def spawn_setup(context, variant):
         spawn_handler,
         controller_handler,
         robot_state_publisher,
-        ground_truth_bridge,
+        *ground_truth_bridge,
         spawn_model,
     ]
 
@@ -327,21 +344,7 @@ def demo_setup(context, variant):
         }.items(),
     )
 
-    clock_bridge_config = os.path.join(
-        package_share,
-        "config",
-        version["clock_bridge"],
-    )
-    clock_bridge_parameters = {
-        "config_file": clock_bridge_config,
-    }
-    start_clock_bridge = Node(
-        package="ros_gz_bridge",
-        executable="parameter_bridge",
-        name="clock_bridge",
-        output="screen",
-        parameters=[clock_bridge_parameters],
-    )
+    start_clock_bridge = bridge_actions(package_share, version, "clock")
 
     spawn_robot = IncludeLaunchDescription(
         PythonLaunchDescriptionSource(
@@ -365,7 +368,7 @@ def demo_setup(context, variant):
 
     return [
         start_gazebo,
-        start_clock_bridge,
+        *start_clock_bridge,
         spawn_robot,
     ]
 

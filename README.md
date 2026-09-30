@@ -112,9 +112,11 @@ The URDF has three focused files:
 The complete model accepts `config_file`, `gazebo_version`, `prefix`, `namespace`,
 `controllers_file` and `publish_ground_truth`. The fixed-version launch entry point
 supplies these values; there is no runtime Gazebo-version launch argument.
-Bridge definitions are kept in `config/clock_bridge_*.yaml` and
-`config/robot_bridge_*.yaml`; launch files only select the configuration that
-matches the requested Gazebo family.
+Bridge definitions share one file per family: `config/bridge_ign.yaml` or
+`config/bridge_gz.yaml`. Demo selects the global `/clock` entry; spawn selects
+robot entries with namespace expansion and enables ground truth only when
+requested. Launch writes the selected entries to temporary bridge files and
+removes them on shutdown, so spawning a robot does not create another clock bridge.
 
 ```bash
 ros2 launch swerve_gazebo_sim demo_ign.launch.py namespace:=robot1 robot_name:=robot1
@@ -137,6 +139,17 @@ Spawning and controller activation are sequenced by process completion, with a
 each namespace lives in a temporary file and is removed when launch shuts down.
 
 ## Motion model and limits
+
+`config/swerve.yaml` documents every parameter, its unit and where it is used.
+`max_steering_rate` limits steering-angle command changes in rad/s;
+`max_wheel_speed` limits drive-wheel speed in rad/s, and
+`max_wheel_acceleration` limits drive-wheel command acceleration/deceleration in
+rad/s² during active drive. Stops and interlocks command zero immediately.
+For aligned pure translation, wheel acceleration times wheel radius gives the
+linear acceleration (4 m/s² with the defaults). This is not a general body-level
+acceleration cap when steering changes. Independent maximum body linear/yaw
+speeds and accelerations, steering acceleration and jerk are not configured by
+the current controller. Joint torque limits and tire friction remain model values.
 
 The controller selects an explicit mode from each body command:
 

@@ -1,0 +1,11 @@
+# Standard ros_gz_bridge entries shared by demo and spawn launch.
+# Demo selects /clock once for the world. Spawn selects robot topics only.
+# Keep world topics absolute and robot topics relative for namespace expansion.
+- topic_name: "/clock"
+  ros_type_name: "rosgraph_msgs/msg/Clock"
+  gz_type_name: "gz.msgs.Clock"
+  direction: GZ_TO_ROS
+- topic_name: "ground_truth/odom"
+  ros_type_name: "nav_msgs/msg/Odometry"
+  gz_type_name: "gz.msgs.Odometry"
+  direction: GZ_TO_ROS

@@ -88,7 +88,10 @@ Four fixed launch entry points provide the two Gazebo families:
 no launch argument selects a family at runtime. `ign` uses
 Gazebo Sim 6, Ignition Transport message names and Ignition plugin names. `gz`
 uses Gazebo Sim 8, Gazebo Transport message names and `gz-sim` plugin names.
-Each family has a matching world and bridge YAML files. No runtime probing or
+Each family has a matching world and one combined bridge YAML file. Demo selects
+its world clock entry, and spawn selects its robot entries. The selected lists
+are written to temporary bridge files and cleaned up on launch shutdown.
+No runtime probing or
 fallback aliases are used, so a requested family always produces one known set
 of model, world and bridge settings.
 Model link names, joint names and odometry frames share one prefix. ROS topics and
