@@ -1,5 +1,22 @@
 # Validation record
 
+This is a chronological record. Earlier combined lateral/yaw results describe
+the former unrestricted command interface, not the current three-mode controller.
+The current supported motions are documented in README.md and tested by the
+three-mode suite below. Historical counts and measurements are not claims about
+later revisions.
+
+## Interrupted transition regression (2026-09-30)
+
+The previous controller could resume differential drive before steering returned
+home when a pending crab/spin transition was cancelled back to differential.
+The fix clears the old active mode when a transition begins. Regression cases
+cover both interrupted returns and all six directed changes among the three modes.
+The kinematics suite passed 26 cases locally; isolated checks of the actual timer
+methods passed the six direct transitions and both interrupted returns. Full ROS
+controller and physical tests require a sourced ROS/Gazebo environment and are
+not implied by these isolated checks.
+
 Date: 2026-09-25.
 
 Environment: Ubuntu 22.04, ROS 2 Humble, Python 3.10.12, Gazebo Fortress 6.16.0,

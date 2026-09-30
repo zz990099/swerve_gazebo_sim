@@ -3,8 +3,9 @@
 A standalone four-wheel steering / four-wheel drive chassis simulation. A simple
 box chassis and four cylindrical wheels provide a generic starting point without
 vendor meshes or application-specific messages. Each steering module has a bounded
-±90° steering joint and a continuous wheel joint. Reversing wheel speed allows
-motion in any planar direction, including simultaneous translation and rotation.
+±90° steering joint and a continuous wheel joint. The command interface supports
+double-Ackermann driving, pure spin and crab translation in either direction.
+Lateral translation combined with yaw is deliberately unsupported.
 
 ## Supported environment
 
@@ -53,9 +54,22 @@ world_name:=YOUR_WORLD` and pass the same `gazebo_version` used to start that wo
 ## Drive the chassis
 
 ```bash
+# Double-Ackermann driving: forward translation with yaw, no lateral velocity.
 ros2 topic pub -r 20 /cmd_vel geometry_msgs/msg/TwistStamped \
-  '{twist: {linear: {x: 0.4, y: 0.2}, angular: {z: 0.3}}}'
+  '{twist: {linear: {x: 0.4}, angular: {z: 0.2}}}'
+
+# Spin: pure yaw, no translation.
+ros2 topic pub -r 20 /cmd_vel geometry_msgs/msg/TwistStamped \
+  '{twist: {angular: {z: 0.3}}}'
+
+# Crab: translation, no yaw. Negative x/y and pure lateral motion also work.
+ros2 topic pub -r 20 /cmd_vel geometry_msgs/msg/TwistStamped \
+  '{twist: {linear: {x: 0.4, y: 0.2}}}'
 ```
+
+Run one publisher at a time and stop it before trying another mode. A command
+with both nonzero lateral velocity and yaw stops the drive and returns steering
+home. Pure forward/reverse translation is classified as differential mode.
 
 Commands are expressed in `base_footprint`. Empty `header.frame_id` means that
 frame; a zero stamp uses reception time. Nonzero stamps must use simulation time.
@@ -139,6 +153,10 @@ so steering feedback variation cannot interrupt an active maneuver. Spin and cra
 continue checking their steering targets. Wheel acceleration limiting begins after
 entry. Feedback loss stops wheel commands. These measures reduce transients but do
 not provide real hardware safety.
+
+Interrupting a transition invalidates the previous active mode. Returning to that
+mode, or selecting a third mode, must pass the new entry interlock before drive
+commands resume.
 
 In differential mode, a module at `(x_i, y_i)` targets velocity
 `(vx - wz*y_i, wz*x_i)`. This produces opposite front/rear steering angles and
