@@ -87,9 +87,20 @@ control:
   # rad; symmetric steering travel +/- pi/2. This release requires exactly pi/2:
   # it is not a continuously rotating steering model or a freely tunable range.
   steering_limit: 1.5707963267948966
-  # Publish encoder odom -> base_footprint TF. Disable if another node owns it.
-  # Odometry messages continue to be published when this is false.
+  # Publish wheel/steering-kinematic Odometry messages. Pose integration and
+  # feedback processing continue when disabled; TF has its own independent switch.
+  publish_odom: true
+  # Relative names expand under the robot namespace; absolute names stay global.
+  odom_topic: odom
+  # Publish odometry TF. Disable if another estimator owns the same transform.
+  # This is independent of publish_odom; either output can be enabled on its own.
   publish_odom_tf: true
+  # Shared Odometry header.frame_id / TF parent and child_frame_id / TF child.
+  # Empty values select <prefix>odom and <prefix>base_footprint. Explicit names
+  # are used exactly as supplied: no automatic prefix or coordinate conversion.
+  # The child should correspond to the robot's physical base frame to connect TF.
+  odom_frame: ""
+  odom_child_frame: ""
   # Fixed nominal diagonals for planar x/y/yaw covariance, not an estimator:
   # pose uses m^2 for x/y and rad^2 for yaw; other unsupported axes use 1e6.
   pose_variance: 0.02

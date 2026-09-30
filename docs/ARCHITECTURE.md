@@ -15,7 +15,7 @@ flowchart LR
     J --> K
     J --> R[Robot state publisher]
     K --> O[Encoder odometry and odom TF]
-    G -. optional .-> T[Ground truth odometry]
+    G -. test only .-> T[Gazebo Transport truth reader]
 ```
 
 `kinematics.py` is independent of ROS. It computes wheel commands and fits the body
@@ -88,21 +88,31 @@ Four fixed launch entry points provide the two Gazebo families:
 no launch argument selects a family at runtime. `ign` uses
 Gazebo Sim 6, Ignition Transport message names and Ignition plugin names. `gz`
 uses Gazebo Sim 8, Gazebo Transport message names and `gz-sim` plugin names.
-Each family has a matching world and one combined bridge YAML file. Demo selects
-its world clock entry, and spawn selects its robot entries. The selected lists
-are written to temporary bridge files and cleaned up on launch shutdown.
+Each family has a matching world and one complete bridge YAML file. A single
+generic `bridge` node in spawn loads every configured mapping, with no clock/robot
+partitioning. Demo includes spawn and creates no additional bridge. The default
+file contains `/clock`; sensor topics can be added to the same list. Ground-truth
+odometry is not bridged. Tests read it directly from Gazebo Transport.
 No runtime probing or
 fallback aliases are used, so a requested family always produces one known set
 of model, world and bridge settings.
-Model link names, joint names and odometry frames share one prefix. ROS topics and
+Model link names and joint names share one prefix. Odometry frames use that
+prefix by default and can be overridden explicitly. ROS topics and
 controller managers use a ROS namespace. Global TF topics combine frames from all
 robots, while one world clock serves every robot.
 
-The demo starts a local world and clock bridge. The spawn entry point joins a running
+The demo starts a local world and includes spawn. Spawn starts the generic bridge
+unless `start_bridge:=false` reuses an existing one. The spawn entry point joins a running
 world, creates the model, waits for creation, activates the three ros2_control
 controllers, then starts the swerve controller. Startup failure terminates that launch.
 Each launch gets its own generated controller parameter file, cleaned up on shutdown.
 
-The implementation intentionally targets the verified Humble/Fortress APIs. Porting
+The implementation targets the verified Humble/Fortress and Jazzy/Harmonic pairs. Porting
 to another Gazebo generation includes reviewing world plugin names, the launch
 version argument and bridge message names, followed by the same physical tests.
+
+Odometry messages and TF have independent startup switches. `odom_topic` controls
+the ROS publisher topic, while `odom_frame` and `odom_child_frame` are shared by
+Odometry and TF. Empty frame names select the automatic prefix. Renaming a frame
+does not transform its coordinates or rename URDF links. Encoder pose integration
+continues even when both outputs are disabled.

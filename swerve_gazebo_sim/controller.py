@@ -12,7 +12,11 @@ from sensor_msgs.msg import JointState
 from std_msgs.msg import Float64MultiArray
 from tf2_ros import TransformBroadcaster
 
-from swerve_gazebo_sim.bringup import TRANSITION_DEFAULTS, validate_control
+from swerve_gazebo_sim.bringup import (
+    ODOMETRY_DEFAULTS,
+    TRANSITION_DEFAULTS,
+    validate_control,
+)
 from swerve_gazebo_sim.kinematics import SwerveKinematics, integrate_pose
 from swerve_gazebo_sim.motion import MotionSupervisor, TransitionPhase
 
@@ -33,6 +37,7 @@ class SwerveController(Node):
             "max_steering_rate": 2.5,
             "steering_alignment_tolerance": 0.05,
             **TRANSITION_DEFAULTS,
+            **ODOMETRY_DEFAULTS,
             "publish_odom_tf": True,
             "pose_variance": 0.02,
             "twist_variance": 0.02,
@@ -61,8 +66,16 @@ class SwerveController(Node):
             self.configuration["joint_prefix"] + corner + "_steering_joint"
             for corner in corners
         ]
-        self.odom_frame = self.configuration["frame_prefix"] + "odom"
+        self.odom_frame = (
+            self.configuration["odom_frame"]
+            or self.configuration["frame_prefix"] + "odom"
+        )
         self.base_frame = self.configuration["frame_prefix"] + "base_footprint"
+        self.odom_child_frame = (
+            self.configuration["odom_child_frame"] or self.base_frame
+        )
+        if self.odom_frame == self.odom_child_frame:
+            raise ValueError("Odometry parent and child frames must differ")
         self.command = (0.0, 0.0, 0.0)
         self.command_stamp = None
         self.feedback_stamp = None
@@ -81,7 +94,11 @@ class SwerveController(Node):
         self.steer_pub = self.create_publisher(
             Float64MultiArray, "steering_controller/commands", 10
         )
-        self.odom_pub = self.create_publisher(Odometry, "odom", 10)
+        self.odom_pub = (
+            self.create_publisher(Odometry, self.configuration["odom_topic"], 10)
+            if self.configuration["publish_odom"]
+            else None
+        )
         self.status_pub = self.create_publisher(DiagnosticArray, "drive_status", 10)
         self.transform_broadcaster = (
             TransformBroadcaster(self)
@@ -247,7 +264,7 @@ class SwerveController(Node):
         odom = Odometry()
         odom.header.stamp = msg.header.stamp
         odom.header.frame_id = self.odom_frame
-        odom.child_frame_id = self.base_frame
+        odom.child_frame_id = self.odom_child_frame
         odom.pose.pose.position.x = self.pose[0]
         odom.pose.pose.position.y = self.pose[1]
         odom.pose.pose.orientation.z = math.sin(self.pose[2] / 2)
@@ -261,7 +278,8 @@ class SwerveController(Node):
         for idx in (14, 21, 28):
             odom.pose.covariance[idx] = 1e6
             odom.twist.covariance[idx] = 1e6
-        self.odom_pub.publish(odom)
+        if self.odom_pub is not None:
+            self.odom_pub.publish(odom)
         if self.transform_broadcaster is not None:
             transform = TransformStamped()
             transform.header = odom.header

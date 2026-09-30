@@ -88,12 +88,12 @@ wall-clock emergency stop is outside this simulation package.
 | `wheel_controller/commands` | `std_msgs/Float64MultiArray` | Internal wheel rad/s, FL FR RL RR |
 | `steering_controller/commands` | `std_msgs/Float64MultiArray` | Internal steering radians, same order |
 | `drive_status` | `diagnostic_msgs/DiagnosticArray` | Requested/active mode, phase and blocking reason |
-| `ground_truth/odom` | `nav_msgs/Odometry` | Optional Gazebo model pose, for validation only |
 
 `swerve_controller` owns `odom → base_footprint`; `robot_state_publisher` owns the
 remaining robot TF. All frames are published on the shared `/tf` and `/tf_static`
 topics with unique frame names. Set `control.publish_odom_tf: false` when an
-external estimator owns the odometry TF. Ground truth never broadcasts TF.
+external estimator owns the odometry TF. Odometry is computed from measured wheel
+velocities and steering angles in `controller.py`, without Gazebo truth input.
 
 ## Configuration and multiple robots
 
@@ -112,31 +112,57 @@ The URDF has three focused files:
 The complete model accepts `config_file`, `gazebo_version`, `prefix`, `namespace`,
 `controllers_file` and `publish_ground_truth`. The fixed-version launch entry point
 supplies these values; there is no runtime Gazebo-version launch argument.
-Bridge definitions share one file per family: `config/bridge_ign.yaml` or
-`config/bridge_gz.yaml`. Demo selects the global `/clock` entry; spawn selects
-robot entries with namespace expansion and enables ground truth only when
-requested. Launch writes the selected entries to temporary bridge files and
-removes them on shutdown, so spawning a robot does not create another clock bridge.
+One generic node named `bridge` loads the entire `config/bridge_ign.yaml` or
+`config/bridge_gz.yaml` list. The default list contains `/clock`; add sensor or
+other topic mappings to the same file or pass `bridge_config:=/absolute/path/bridge.yaml`.
+No ground-truth odometry is bridged. Relative bridge topics expand under the robot
+namespace; absolute topics such as `/clock` remain global. Both demo and spawn
+use the same bridge through spawn. Set `start_bridge:=false` when joining a world
+that already has the required bridge.
 
 ```bash
 ros2 launch swerve_gazebo_sim demo_ign.launch.py namespace:=robot1 robot_name:=robot1
 # In a second sourced terminal, reuse the running world and its clock:
-ros2 launch swerve_gazebo_sim spawn_ign.launch.py namespace:=robot2 robot_name:=robot2 x:=2
+ros2 launch swerve_gazebo_sim spawn_ign.launch.py namespace:=robot2 robot_name:=robot2 x:=2 start_bridge:=false
 ```
 
 Robot 1 uses `/robot1/cmd_vel`, `/robot1/odom`, its own controller manager and
 `robot1_base_footprint` etc. `prefix:=auto` derives link, joint and frame names
 from the namespace; override it explicitly if needed. Use a unique `robot_name`,
-namespace and prefix for each robot. The clock bridge belongs to the world and
-is started once by `demo_ign.launch.py`, never by `spawn_ign.launch.py`.
+namespace and prefix for each robot. Reuse one generic bridge per world rather
+than creating duplicate `/clock` publishers.
 
 Launch also accepts `x`, `y`, `z`, `yaw`, `world_name` and
-`publish_ground_truth`. Both demo entry points additionally accept `headless` and an
+`publish_ground_truth` (Gazebo Transport only, for test measurements). Both demo entry points additionally accept `headless` and an
 absolute `world` SDF path. The generic `spawn.launch.py` and `demo.launch.py`
 entry points have been removed; choose the matching suffixed entry point.
 Spawning and controller activation are sequenced by process completion, with a
 60-second controller-manager timeout. The controller configuration generated for
 each namespace lives in a temporary file and is removed when launch shuts down.
+
+Odometry outputs can be overridden in either spawn or demo launch:
+
+| Launch argument | Default from YAML | Purpose |
+|---|---|---|
+| `publish_odom` | `true` | Publish kinematic `nav_msgs/Odometry` |
+| `odom_topic` | `odom` | Relative topic uses the robot namespace; absolute topic stays global |
+| `publish_odom_tf` | `true` | Publish TF independently of Odometry messages |
+| `odom_frame` | Automatic | Odometry header and TF parent frame |
+| `odom_child_frame` | Automatic | Odometry child and TF child frame |
+
+Empty launch values use YAML; empty frame values in YAML select `<prefix>odom`
+and `<prefix>base_footprint`. Explicit frame names are used unchanged, without
+prefixing or a coordinate conversion. The child frame should match the physical
+base frame to connect the robot TF tree. Disabling either output does not stop
+pose integration, joint feedback processing or motion control.
+
+```bash
+ros2 launch swerve_gazebo_sim demo_gz.launch.py \
+  publish_odom:=true odom_topic:=wheel/odom publish_odom_tf:=false
+ros2 launch swerve_gazebo_sim spawn_ign.launch.py \
+  publish_odom:=false publish_odom_tf:=true \
+  odom_frame:=local_odom odom_child_frame:=base_footprint
+```
 
 ## Motion model and limits
 
@@ -236,8 +262,10 @@ python3 src/swerve_gazebo_sim/test/run_simulation.py --gazebo-version gz
 
 Use a separate ROS domain / Gazebo transport partition if other simulations are
 already running. The multi-robot check drives one robot while observing that a
-second robot stays still. To probe an already running demo, enable
-`publish_ground_truth:=true` and run `test/smoke_motion.py` directly.
+second robot stays still. The probe reads simulator truth directly with
+`ign topic` / `gz topic --json-output`; it never bridges or republishes truth to ROS.
+To probe an already running demo, enable `publish_ground_truth:=true` and run
+`test/smoke_motion.py --gazebo-version ign` (or `gz`) directly.
 See `docs/VALIDATION.md` for the recorded environment and results.
 
 GitHub Actions runs the same checks on the two supported ROS/Gazebo pairs:

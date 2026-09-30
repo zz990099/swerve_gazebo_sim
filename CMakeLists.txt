@@ -24,6 +24,7 @@ if(BUILD_TESTING)
   ament_add_pytest_test(controller test/test_controller.py)
   ament_add_pytest_test(launch test/test_launch.py)
   ament_add_pytest_test(runner test/test_runner.py)
+  ament_add_pytest_test(truth test/test_truth.py)
 endif()
 
 ament_package()

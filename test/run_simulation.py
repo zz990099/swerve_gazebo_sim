@@ -101,7 +101,12 @@ def main():
         if args.multi:
             command += ["namespace:=robot1", "robot_name:=robot1"]
         start("demo.log", command)
-        probe = [sys.executable, str(Path(__file__).with_name("smoke_motion.py"))]
+        probe = [
+            sys.executable,
+            str(Path(__file__).with_name("smoke_motion.py")),
+            "--gazebo-version",
+            args.gazebo_version,
+        ]
         if args.multi:
             start(
                 "peer.log",
@@ -114,6 +119,7 @@ def main():
                     "robot_name:=robot2",
                     "x:=5",
                     "publish_ground_truth:=true",
+                    "start_bridge:=false",
                 ],
             )
             probe += ["--namespace", "robot1", "--stationary-peer", "robot2"]

@@ -10,6 +10,7 @@ import time
 
 import rclpy
 from diagnostic_msgs.msg import DiagnosticArray, DiagnosticStatus
+from gazebo_truth import GazeboTruth
 from geometry_msgs.msg import TwistStamped
 from nav_msgs.msg import Odometry
 from rclpy.node import Node
@@ -46,24 +47,28 @@ def relative(start, finish):
 
 
 class Probe(Node):
-    def __init__(self, namespace, peer):
+    def __init__(self, namespace, peer, family):
         super().__init__(
             "swerve_motion_probe",
             namespace=namespace,
             parameter_overrides=[Parameter("use_sim_time", value=True)],
         )
-        self.truth = None
+        self.truth_reader = GazeboTruth(
+            "/" + "/".join(filter(None, (namespace.strip("/"), "ground_truth/odom"))),
+            family,
+        )
         self.odom = None
-        self.peer = None
+        self.peer_reader = (
+            GazeboTruth("/" + peer.strip("/") + "/ground_truth/odom", family)
+            if peer
+            else None
+        )
         self.peer_odom = None
         self.joint_state = None
         self.drive_status = None
         self.tf_buffer = Buffer(node=self)
         self.tf_listener = TransformListener(self.tf_buffer, self)
         self.publisher = self.create_publisher(TwistStamped, "cmd_vel", 10)
-        self.create_subscription(
-            Odometry, "ground_truth/odom", lambda msg: setattr(self, "truth", msg), 10
-        )
         self.create_subscription(
             Odometry, "odom", lambda msg: setattr(self, "odom", msg), 10
         )
@@ -82,16 +87,18 @@ class Probe(Node):
         if peer:
             self.create_subscription(
                 Odometry,
-                "/" + peer.strip("/") + "/ground_truth/odom",
-                lambda msg: setattr(self, "peer", msg),
-                10,
-            )
-            self.create_subscription(
-                Odometry,
                 "/" + peer.strip("/") + "/odom",
                 lambda msg: setattr(self, "peer_odom", msg),
                 10,
             )
+
+    @property
+    def truth(self):
+        return self.truth_reader.latest
+
+    @property
+    def peer(self):
+        return self.peer_reader.latest if self.peer_reader is not None else None
 
     def run_for(self, duration, velocity=None):
         start = self.get_clock().now().nanoseconds * 1e-9
@@ -137,9 +144,10 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--namespace", default="")
     parser.add_argument("--stationary-peer", default="")
+    parser.add_argument("--gazebo-version", choices=("ign", "gz"), default="ign")
     args = parser.parse_args()
     rclpy.init()
-    node = Probe(args.namespace, args.stationary_peer)
+    node = Probe(args.namespace, args.stationary_peer, args.gazebo_version)
     try:
         deadline = time.monotonic() + 60
         while (
@@ -155,6 +163,8 @@ def main():
                     "Missing joint state, wheel odometry or Gazebo ground truth"
                 )
         node.run_for(2, (0.0, 0.0, 0.0))
+        assert node.get_node_names().count("bridge") == 1
+        assert not node.get_publishers_info_by_topic("ground_truth/odom")
         prefix = (
             args.namespace.strip("/").replace("/", "_") + "_" if args.namespace else ""
         )
@@ -274,6 +284,9 @@ def main():
         print("PASS: all physical motion checks", flush=True)
     finally:
         node.publisher.publish(TwistStamped())
+        node.truth_reader.close()
+        if node.peer_reader is not None:
+            node.peer_reader.close()
         node.destroy_node()
         rclpy.shutdown()
 

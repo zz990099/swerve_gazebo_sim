@@ -6,6 +6,11 @@ The current supported motions are documented in README.md and tested by the
 three-mode suite below. Historical counts and measurements are not claims about
 later revisions.
 
+Current tests read ground truth directly from Gazebo Transport JSON without a
+ROS odometry bridge. Runtime odometry remains a wheel/steering kinematic estimate.
+Launch uses one generic bridge and exposes independent Odometry/TF output settings.
+The dated records below describe the configuration used at that time.
+
 ## Interrupted transition regression (2026-09-30)
 
 The previous controller could resume differential drive before steering returned

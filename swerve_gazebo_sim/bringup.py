@@ -38,6 +38,10 @@ CONTROL = (
     "status_publish_rate",
     "steering_limit",
     "publish_odom_tf",
+    "publish_odom",
+    "odom_topic",
+    "odom_frame",
+    "odom_child_frame",
     "pose_variance",
     "twist_variance",
 )
@@ -52,6 +56,13 @@ TRANSITION_DEFAULTS = {
     "mode_switch_timeout": 5.0,
     "stopped_wheel_speed": 0.05,
     "status_publish_rate": 10.0,
+}
+
+ODOMETRY_DEFAULTS = {
+    "publish_odom": True,
+    "odom_topic": "odom",
+    "odom_frame": "",
+    "odom_child_frame": "",
 }
 
 GAZEBO_VARIANTS = {
@@ -91,15 +102,17 @@ def load_config(path):
     if not isinstance(cfg, dict) or set(cfg) != {"geometry", "control"}:
         raise ValueError("Configuration must contain geometry and control mappings")
     if isinstance(cfg["control"], dict):
-        for key, value in TRANSITION_DEFAULTS.items():
+        for key, value in {**TRANSITION_DEFAULTS, **ODOMETRY_DEFAULTS}.items():
             cfg["control"].setdefault(key, value)
     for section, keys in (("geometry", GEOMETRY), ("control", CONTROL)):
         if not isinstance(cfg[section], dict) or set(cfg[section]) != set(keys):
             raise ValueError(f'{section} must contain exactly: {", ".join(keys)}')
         for key, value in cfg[section].items():
-            if key == "publish_odom_tf":
+            if key in ("publish_odom", "publish_odom_tf"):
                 if not isinstance(value, bool):
-                    raise ValueError("publish_odom_tf must be boolean")
+                    raise ValueError(f"{key} must be boolean")
+            elif key in ("odom_topic", "odom_frame", "odom_child_frame"):
+                continue  # Validated with the controller's startup parameters below.
             elif (
                 isinstance(value, bool)
                 or not isinstance(value, (int, float))
@@ -126,19 +139,6 @@ def load_config(path):
     if geometry["wheelbase"] <= 2 * geometry["wheel_radius"]:
         raise ValueError("wheelbase must exceed the wheel diameter")
     return cfg
-
-
-def bridge_config(path, scope):
-    """Select global clock or robot topics from one standard bridge YAML file."""
-    if scope not in ("clock", "robot"):
-        raise ValueError("Bridge scope must be clock or robot")
-    with open(path, encoding="utf-8") as stream:
-        bridges = yaml.safe_load(stream)
-    return [
-        entry
-        for entry in bridges
-        if (entry["topic_name"] == "/clock") == (scope == "clock")
-    ]
 
 
 def names(namespace, robot_name, prefix):
@@ -179,9 +179,24 @@ def validate_control(configuration):
     """Validate controller startup parameters, including hysteresis ordering."""
     for key in CONTROL:
         value = configuration[key]
-        if key == "publish_odom_tf":
+        if key in ("publish_odom", "publish_odom_tf"):
             if not isinstance(value, bool):
-                raise ValueError("publish_odom_tf must be boolean")
+                raise ValueError(f"{key} must be boolean")
+            continue
+        if key in ("odom_topic", "odom_frame", "odom_child_frame"):
+            if not isinstance(value, str):
+                raise ValueError(f"{key} must be a string")
+            if key == "odom_topic" and not value.strip():
+                raise ValueError("odom_topic must not be empty")
+            if (
+                key != "odom_topic"
+                and value
+                and (
+                    value.startswith("/")
+                    or any(character.isspace() for character in value)
+                )
+            ):
+                raise ValueError(f"{key} must not start with '/' or contain whitespace")
             continue
         allow_zero = key in ("mode_dwell_time", "steering_alignment_duration")
         if (

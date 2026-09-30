@@ -7,8 +7,8 @@ import xacro
 import yaml
 
 from swerve_gazebo_sim.bringup import (
+    ODOMETRY_DEFAULTS,
     TRANSITION_DEFAULTS,
-    bridge_config,
     controller_config,
     gazebo_variant,
     load_config,
@@ -133,14 +133,12 @@ def test_gazebo_variants_reference_version_specific_files():
     for variant, message_prefix in ((ignition, "ignition"), (harmonic, "gz")):
         bridge_file = ROOT / "config" / variant["bridge"]
         combined = yaml.safe_load(bridge_file.read_text(encoding="utf-8"))
-        clock = bridge_config(bridge_file, "clock")
-        robot = bridge_config(bridge_file, "robot")
-        assert clock + robot == combined
-        assert len(clock) == len(robot) == 1
-        assert clock[0]["topic_name"] == "/clock"
-        assert clock[0]["gz_type_name"] == f"{message_prefix}.msgs.Clock"
-        assert robot[0]["topic_name"] == "ground_truth/odom"
-        assert robot[0]["gz_type_name"] == f"{message_prefix}.msgs.Odometry"
+        assert len(combined) == 1
+        assert combined[0]["topic_name"] == "/clock"
+        assert combined[0]["gz_type_name"] == f"{message_prefix}.msgs.Clock"
+        assert all(
+            entry["ros_type_name"] != "nav_msgs/msg/Odometry" for entry in combined
+        )
 
     ignition_world = ET.parse(ROOT / "worlds" / ignition["world"]).getroot()
     harmonic_world = ET.parse(ROOT / "worlds" / harmonic["world"]).getroot()
@@ -201,10 +199,10 @@ def test_invalid_namespace():
 
 def test_legacy_configuration_gets_transition_defaults(tmp_path):
     cfg = load_config(ROOT / "config/swerve.yaml")
-    for key in TRANSITION_DEFAULTS:
+    for key in {**TRANSITION_DEFAULTS, **ODOMETRY_DEFAULTS}:
         del cfg["control"][key]
     path = tmp_path / "legacy.yaml"
     path.write_text(yaml.safe_dump(cfg))
     loaded = load_config(path)
-    for key, value in TRANSITION_DEFAULTS.items():
+    for key, value in {**TRANSITION_DEFAULTS, **ODOMETRY_DEFAULTS}.items():
         assert loaded["control"][key] == value

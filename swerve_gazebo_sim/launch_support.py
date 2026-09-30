@@ -26,44 +26,39 @@ from launch_ros.actions import Node
 
 from launch import LaunchDescription
 
-from .bringup import bridge_config, controller_config, load_config, names
+from .bringup import ODOMETRY_DEFAULTS, controller_config, load_config, names
 
 PACKAGE_NAME = "swerve_gazebo_sim"
 
 
-def bridge_actions(package_share, variant, scope, namespace=""):
-    """Keep one bridge source while starting clock and robot topics separately."""
-    source = os.path.join(package_share, "config", variant["bridge"])
-    entries = bridge_config(source, scope)
-    with tempfile.NamedTemporaryFile(
-        mode="w", prefix=f"swerve_{scope}_bridge_", suffix=".yaml", delete=False
-    ) as stream:
-        yaml.safe_dump(entries, stream)
-        config_file = stream.name
-
-    def remove_temporary_bridge_file(event, launch_context):
-        del event, launch_context
-        if os.path.exists(config_file):
-            os.unlink(config_file)
-        return []
-
-    parameters = {"config_file": config_file}
-    options = {}
-    if scope == "robot":
-        parameters.update(expand_gz_topic_names=True, use_sim_time=True)
-        options["condition"] = IfCondition(LaunchConfiguration("publish_ground_truth"))
+def odometry_launch_arguments():
+    descriptions = {
+        "publish_odom": "Publish kinematic Odometry; empty uses YAML",
+        "odom_topic": "Odometry topic; relative names use the robot namespace",
+        "publish_odom_tf": "Publish odometry TF independently of Odometry messages; empty uses YAML",
+        "odom_frame": "Odometry / TF parent frame; empty uses YAML or automatic prefix",
+        "odom_child_frame": "Odometry / TF child frame; empty uses YAML or automatic prefix",
+    }
     return [
-        RegisterEventHandler(OnShutdown(on_shutdown=remove_temporary_bridge_file)),
-        Node(
-            package="ros_gz_bridge",
-            executable="parameter_bridge",
-            name="clock_bridge" if scope == "clock" else "ground_truth_bridge",
-            namespace=namespace,
-            output="screen",
-            parameters=[parameters],
-            **options,
-        ),
+        DeclareLaunchArgument(name, default_value="", description=description)
+        for name, description in descriptions.items()
     ]
+
+
+def odometry_parameters(context, configuration):
+    parameters = {
+        key: configuration[key] for key in (*ODOMETRY_DEFAULTS, "publish_odom_tf")
+    }
+    for key in parameters:
+        value = LaunchConfiguration(key).perform(context)
+        if not value:
+            continue
+        if key in ("publish_odom", "publish_odom_tf"):
+            if value.lower() not in ("true", "false"):
+                raise ValueError(f"{key} must be true or false")
+            value = value.lower() == "true"
+        parameters[key] = value
+    return parameters
 
 
 def spawn_setup(context, variant):
@@ -75,7 +70,6 @@ def spawn_setup(context, variant):
         LaunchConfiguration("robot_name").perform(context),
         LaunchConfiguration("prefix").perform(context),
     )
-    version = variant
     configuration = load_config(config_file)
 
     controller_template = os.path.join(
@@ -198,6 +192,9 @@ def spawn_setup(context, variant):
             "frame_prefix": prefix,
         }
     )
+    controller_node_parameters.update(
+        odometry_parameters(context, configuration["control"])
+    )
     swerve_controller = Node(
         executable=sys.executable,
         arguments=["-m", "swerve_gazebo_sim.controller"],
@@ -207,7 +204,21 @@ def spawn_setup(context, variant):
         parameters=[controller_node_parameters],
     )
 
-    ground_truth_bridge = bridge_actions(package_share, version, "robot", namespace)
+    bridge = Node(
+        package="ros_gz_bridge",
+        executable="parameter_bridge",
+        name="bridge",
+        namespace=namespace,
+        output="screen",
+        condition=IfCondition(LaunchConfiguration("start_bridge")),
+        parameters=[
+            {
+                "config_file": LaunchConfiguration("bridge_config").perform(context),
+                "expand_gz_topic_names": True,
+                "use_sim_time": True,
+            }
+        ],
+    )
 
     def start_controllers_after_spawn(event, launch_context):
         del launch_context
@@ -242,7 +253,7 @@ def spawn_setup(context, variant):
         spawn_handler,
         controller_handler,
         robot_state_publisher,
-        *ground_truth_bridge,
+        bridge,
         spawn_model,
     ]
 
@@ -278,7 +289,7 @@ def generate_spawn_launch_description(variant):
     declare_publish_ground_truth = DeclareLaunchArgument(
         "publish_ground_truth",
         default_value="false",
-        description="Publish Gazebo ground-truth odometry for validation",
+        description="Publish Gazebo-only ground truth for validation; never bridged to ROS",
     )
     declare_x = DeclareLaunchArgument(
         "x",
@@ -303,6 +314,22 @@ def generate_spawn_launch_description(variant):
 
     launch_description = LaunchDescription()
     launch_description.add_action(declare_config)
+    launch_description.add_action(
+        DeclareLaunchArgument(
+            "bridge_config",
+            default_value=os.path.join(package_share, "config", variant["bridge"]),
+            description="Complete YAML for the single generic bridge; may include sensor topics",
+        )
+    )
+    launch_description.add_action(
+        DeclareLaunchArgument(
+            "start_bridge",
+            default_value="true",
+            description="Start the generic bridge; disable when reusing an existing bridge",
+        )
+    )
+    for argument in odometry_launch_arguments():
+        launch_description.add_action(argument)
     launch_description.add_action(declare_namespace)
     launch_description.add_action(declare_prefix)
     launch_description.add_action(declare_robot_name)
@@ -344,14 +371,18 @@ def demo_setup(context, variant):
         }.items(),
     )
 
-    start_clock_bridge = bridge_actions(package_share, version, "clock")
-
     spawn_robot = IncludeLaunchDescription(
         PythonLaunchDescriptionSource(
             os.path.join(package_share, "launch", variant["spawn_launch"])
         ),
         launch_arguments={
             "config": LaunchConfiguration("config").perform(context),
+            "bridge_config": LaunchConfiguration("bridge_config").perform(context),
+            "start_bridge": LaunchConfiguration("start_bridge").perform(context),
+            **{
+                key: LaunchConfiguration(key).perform(context)
+                for key in (*ODOMETRY_DEFAULTS, "publish_odom_tf")
+            },
             "namespace": LaunchConfiguration("namespace").perform(context),
             "prefix": LaunchConfiguration("prefix").perform(context),
             "robot_name": LaunchConfiguration("robot_name").perform(context),
@@ -368,7 +399,6 @@ def demo_setup(context, variant):
 
     return [
         start_gazebo,
-        *start_clock_bridge,
         spawn_robot,
     ]
 
@@ -414,7 +444,7 @@ def generate_demo_launch_description(variant):
     declare_publish_ground_truth = DeclareLaunchArgument(
         "publish_ground_truth",
         default_value="false",
-        description="Publish Gazebo ground-truth odometry for validation",
+        description="Publish Gazebo-only ground truth for validation; never bridged to ROS",
     )
     declare_x = DeclareLaunchArgument(
         "x",
@@ -441,6 +471,22 @@ def generate_demo_launch_description(variant):
     launch_description.add_action(declare_headless)
     launch_description.add_action(declare_world)
     launch_description.add_action(declare_config)
+    launch_description.add_action(
+        DeclareLaunchArgument(
+            "bridge_config",
+            default_value=os.path.join(package_share, "config", variant["bridge"]),
+            description="Complete YAML for the single generic bridge; may include sensor topics",
+        )
+    )
+    launch_description.add_action(
+        DeclareLaunchArgument(
+            "start_bridge",
+            default_value="true",
+            description="Start the generic bridge; disable when reusing an existing bridge",
+        )
+    )
+    for argument in odometry_launch_arguments():
+        launch_description.add_action(argument)
     launch_description.add_action(declare_namespace)
     launch_description.add_action(declare_prefix)
     launch_description.add_action(declare_robot_name)

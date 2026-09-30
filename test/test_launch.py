@@ -6,6 +6,7 @@ from pathlib import Path
 import pytest
 from launch.actions import DeclareLaunchArgument
 
+from launch import LaunchContext
 from swerve_gazebo_sim import launch_support
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -31,6 +32,15 @@ def test_version_specific_launch_has_no_runtime_version_argument(
     }
     assert "gazebo_version" not in arguments
     assert {"config", "namespace", "robot_name", "world_name"} <= arguments
+    assert {
+        "bridge_config",
+        "start_bridge",
+        "publish_odom",
+        "odom_topic",
+        "publish_odom_tf",
+        "odom_frame",
+        "odom_child_frame",
+    } <= arguments
     assert ("world" in arguments) == (kind == "demo")
     assert ("headless" in arguments) == (kind == "demo")
 
@@ -56,3 +66,35 @@ def test_entry_points_bind_their_fixed_family(monkeypatch, family):
 def test_generic_entry_points_are_removed():
     assert not (ROOT / "launch/spawn.launch.py").exists()
     assert not (ROOT / "launch/demo.launch.py").exists()
+
+
+def test_odometry_launch_overrides_preserve_independent_switches():
+    configuration = launch_support.load_config(ROOT / "config/swerve.yaml")["control"]
+    context = LaunchContext()
+    context.launch_configurations.update(
+        publish_odom="false",
+        publish_odom_tf="true",
+        odom_topic="wheel/odom",
+        odom_frame="local_odom",
+        odom_child_frame="robot_base",
+    )
+    result = launch_support.odometry_parameters(context, configuration)
+    assert result == {
+        "publish_odom": False,
+        "publish_odom_tf": True,
+        "odom_topic": "wheel/odom",
+        "odom_frame": "local_odom",
+        "odom_child_frame": "robot_base",
+    }
+
+
+def test_empty_odometry_launch_values_use_yaml():
+    configuration = launch_support.load_config(ROOT / "config/swerve.yaml")["control"]
+    configuration.update(publish_odom_tf=False, odom_topic="custom/odom")
+    context = LaunchContext()
+    context.launch_configurations.update(
+        {key: "" for key in (*launch_support.ODOMETRY_DEFAULTS, "publish_odom_tf")}
+    )
+    result = launch_support.odometry_parameters(context, configuration)
+    assert result["publish_odom_tf"] is False
+    assert result["odom_topic"] == "custom/odom"

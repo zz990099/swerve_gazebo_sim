@@ -6,6 +6,7 @@ from geometry_msgs.msg import TwistStamped
 from rclpy.parameter import Parameter
 from sensor_msgs.msg import JointState
 
+import swerve_gazebo_sim.controller as controller_module
 from swerve_gazebo_sim.controller import SwerveController
 from swerve_gazebo_sim.kinematics import DriveMode
 from swerve_gazebo_sim.motion import TransitionPhase
@@ -352,3 +353,59 @@ def test_timeout_fault_requires_zero_command_before_drive(node):
     assert node.supervisor.phase is TransitionPhase.IDLE
     command(node, x=0.3)
     assert any(tick(node))
+
+
+@pytest.mark.parametrize("publish_odom", [True, False])
+@pytest.mark.parametrize("publish_tf", [True, False])
+def test_odometry_outputs_are_independent_and_use_configured_names(
+    monkeypatch, publish_odom, publish_tf
+):
+    transforms = []
+
+    class Broadcaster:
+        def __init__(self, node):
+            del node
+
+        def sendTransform(self, transform):
+            transforms.append(transform)
+
+    monkeypatch.setattr(controller_module, "TransformBroadcaster", Broadcaster)
+    rclpy.init()
+    node = SwerveController(
+        namespace="robot1",
+        parameter_overrides=[
+            Parameter("publish_odom", value=publish_odom),
+            Parameter("publish_odom_tf", value=publish_tf),
+            Parameter("odom_topic", value="wheel/odometry"),
+            Parameter("odom_frame", value="custom_odom"),
+            Parameter("odom_child_frame", value="custom_base"),
+        ],
+    )
+    try:
+        assert (node.odom_pub is not None) == publish_odom
+        assert (node.transform_broadcaster is not None) == publish_tf
+        messages = Capture()
+        if publish_odom:
+            assert node.odom_pub.topic_name == "/robot1/wheel/odometry"
+            node.odom_pub = messages
+        first = feedback(node, wheel_speeds=[3.0] * 4)
+        node.previous_odom_stamp = (
+            first.header.stamp.sec + first.header.stamp.nanosec * 1e-9 - 0.05
+        )
+        feedback(node, wheel_speeds=[3.0] * 4)
+        assert node.pose[0] > 0
+        assert bool(messages.messages) == publish_odom
+        assert bool(transforms) == publish_tf
+        if publish_odom:
+            message = messages.messages[-1]
+            assert message.header.frame_id == "custom_odom"
+            assert message.child_frame_id == "custom_base"
+            assert message.twist.twist.linear.x == pytest.approx(0.3)
+        if publish_tf:
+            transform = transforms[-1]
+            assert transform.header.frame_id == "custom_odom"
+            assert transform.child_frame_id == "custom_base"
+            assert transform.transform.translation.x == pytest.approx(node.pose[0])
+    finally:
+        node.destroy_node()
+        rclpy.shutdown()
