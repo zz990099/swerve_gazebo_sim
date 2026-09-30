@@ -17,6 +17,19 @@ methods passed the six direct transitions and both interrupted returns. Full ROS
 controller and physical tests require a sourced ROS/Gazebo environment and are
 not implied by these isolated checks.
 
+## Transition supervisor validation (2026-09-30)
+
+The ROS-independent supervisor adds hysteresis, request dwell, measured wheel-stop
+confirmation, stable steering alignment, diagnostic state and a latched transition
+deadline. Local kinematics, model/configuration and supervisor suites passed 61
+cases. The supervisor tests use explicit simulation timestamps and cover all six
+direct mode changes, interrupted returns, third-mode retargets, watchdog recovery,
+crab direction changes, noisy commands, timeout/reset and backwards clock resets.
+Additional ROS adapter cases exercise measured braking and DiagnosticArray output.
+Those adapter cases and physical motions must run in the ROS CI matrix.
+
+## Original validation (2026-09-25)
+
 Date: 2026-09-25.
 
 Environment: Ubuntu 22.04, ROS 2 Humble, Python 3.10.12, Gazebo Fortress 6.16.0,

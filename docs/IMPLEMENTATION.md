@@ -20,6 +20,6 @@ sensor payload in the package. Those can consume its standard ROS interfaces.
 
 Acceptance: the package can be moved to a separate source repository and built in
 an otherwise empty workspace; its own demo spawns a chassis that drives forward,
-backward, sideways, spins, combines translation/rotation and stops on command expiry.
+backward, sideways, spins, follows double-Ackermann arcs and stops on command expiry.
 Two instances must activate all controllers, publish fresh odometry with separate
 TF frames, and respond only to commands in their own namespaces.

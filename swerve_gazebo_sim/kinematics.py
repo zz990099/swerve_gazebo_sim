@@ -1,5 +1,6 @@
 # SPDX-License-Identifier: Apache-2.0
 """Planar rigid-body kinematics. Wheel order is FL, FR, RL, RR."""
+
 import math
 from enum import Enum
 

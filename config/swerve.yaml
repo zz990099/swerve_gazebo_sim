@@ -19,6 +19,15 @@ control:
   max_wheel_acceleration: 40.0  # rad/s^2; timeout stops immediately
   max_steering_rate: 2.5     # rad/s
   steering_alignment_tolerance: 0.05  # rad; wheels remain stopped outside this error
+  mode_linear_enter_threshold: 0.01  # m/s
+  mode_linear_exit_threshold: 0.005  # m/s; lower threshold provides hysteresis
+  mode_angular_enter_threshold: 0.01  # rad/s
+  mode_angular_exit_threshold: 0.005  # rad/s
+  mode_dwell_time: 0.10  # s; stable requested mode before steering
+  steering_alignment_duration: 0.05  # s; stable measured alignment before drive
+  mode_switch_timeout: 5.0  # s; send a zero command to clear a latched fault
+  stopped_wheel_speed: 0.05  # rad/s; measured wheel-stop threshold
+  status_publish_rate: 10.0  # Hz
   steering_limit: 1.5707963267948966
   publish_odom_tf: true
   pose_variance: 0.02       # Fixed nominal covariance, not an uncertainty estimator

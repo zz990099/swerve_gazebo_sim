@@ -4,6 +4,7 @@
 import math
 
 import rclpy
+from diagnostic_msgs.msg import DiagnosticArray, DiagnosticStatus, KeyValue
 from geometry_msgs.msg import TransformStamped, TwistStamped
 from nav_msgs.msg import Odometry
 from rclpy.node import Node
@@ -11,7 +12,9 @@ from sensor_msgs.msg import JointState
 from std_msgs.msg import Float64MultiArray
 from tf2_ros import TransformBroadcaster
 
-from .kinematics import DriveMode, SwerveKinematics, integrate_pose
+from .bringup import TRANSITION_DEFAULTS, validate_control
+from .kinematics import SwerveKinematics, integrate_pose
+from .motion import MotionSupervisor, TransitionPhase
 
 
 class SwerveController(Node):
@@ -29,6 +32,7 @@ class SwerveController(Node):
             "max_wheel_acceleration": 40.0,
             "max_steering_rate": 2.5,
             "steering_alignment_tolerance": 0.05,
+            **TRANSITION_DEFAULTS,
             "publish_odom_tf": True,
             "pose_variance": 0.02,
             "twist_variance": 0.02,
@@ -38,9 +42,7 @@ class SwerveController(Node):
         for key, value in defaults.items():
             self.declare_parameter(key, value)
         self.configuration = {key: self.get_parameter(key).value for key in defaults}
-        for key, value in self.configuration.items():
-            if isinstance(value, float) and (not math.isfinite(value) or value <= 0):
-                raise ValueError(f"{key} must be finite and positive")
+        validate_control(self.configuration)
 
         self.kinematics = SwerveKinematics(
             self.configuration["wheelbase"],
@@ -48,6 +50,8 @@ class SwerveController(Node):
             self.configuration["wheel_radius"],
             self.configuration["steering_limit"],
         )
+        self.supervisor = MotionSupervisor(self.kinematics, self.configuration)
+        self.measured_speeds = [0.0] * 4
         corners = ("fl", "fr", "rl", "rr")
         self.wheel_joint_names = [
             self.configuration["joint_prefix"] + corner + "_wheel_joint"
@@ -78,6 +82,7 @@ class SwerveController(Node):
             Float64MultiArray, "steering_controller/commands", 10
         )
         self.odom_pub = self.create_publisher(Odometry, "odom", 10)
+        self.status_pub = self.create_publisher(DiagnosticArray, "drive_status", 10)
         self.transform_broadcaster = (
             TransformBroadcaster(self)
             if self.configuration["publish_odom_tf"]
@@ -86,6 +91,9 @@ class SwerveController(Node):
         self.create_subscription(TwistStamped, "cmd_vel", self.on_command, 10)
         self.create_subscription(JointState, "joint_states", self.on_feedback, 10)
         self.create_timer(1.0 / self.configuration["update_rate"], self.on_timer)
+        self.create_timer(
+            1.0 / self.configuration["status_publish_rate"], self.publish_status
+        )
 
     def on_command(self, msg):
         now = self.get_clock().now().nanoseconds * 1e-9
@@ -116,6 +124,7 @@ class SwerveController(Node):
             self.feedback_stamp = None
             self.previous_odom_stamp = None
             self.pose = (0.0, 0.0, 0.0)
+            self.supervisor.reset()
         dt = max(0.0, min(dt, 0.1))
         command_is_current = self.command_stamp is not None and (
             0 <= now - self.command_stamp <= self.configuration["cmd_timeout"]
@@ -123,54 +132,66 @@ class SwerveController(Node):
         feedback_is_current = self.feedback_stamp is not None and (
             0 <= now - self.feedback_stamp <= self.configuration["feedback_timeout"]
         )
-        has_motion_command = any(abs(value) > 1e-9 for value in self.command)
-
-        if command_is_current and feedback_is_current and has_motion_command:
-            mode, wheel_targets, steering_targets = self.kinematics.commands_for_motion(
-                *self.command,
-                self.angles,
-            )
-        else:
-            mode = None
-            wheel_targets = [0.0] * 4
-            steering_targets = [0.0] * 4
-
-        self.requested_mode = mode
-        entering_mode = mode is not None and mode is not self.active_mode
-        if entering_mode and mode is DriveMode.DIFFERENTIAL:
-            commanded_steering_targets = [0.0] * 4
-        else:
-            commanded_steering_targets = steering_targets
-
-        self._move_steering_toward(commanded_steering_targets, dt)
+        previous_phase = self.supervisor.phase
+        decision = self.supervisor.update(
+            self.command,
+            self.angles,
+            self.measured_speeds,
+            self.sent_angles,
+            now,
+            command_is_current,
+            feedback_is_current,
+        )
+        self.requested_mode = self.supervisor.requested_mode
+        self.active_mode = self.supervisor.active_mode
         self.steering_is_aligned = feedback_is_current and all(
             abs(target - measured) <= self.configuration["steering_alignment_tolerance"]
-            for target, measured in zip(commanded_steering_targets, self.angles)
+            for target, measured in zip(decision.steering_targets, self.angles)
         )
-
-        if mode is None:
-            self.active_mode = None
-            self.sent_speeds = [0.0] * 4
-        elif mode is not self.active_mode:
-            # A mode transition keeps drive stopped until steering is aligned.
-            # Invalidate the previous mode immediately: a command returning to it
-            # during alignment must pass that mode's entry interlock again.
-            self.active_mode = None
-            self.sent_speeds = [0.0] * 4
-            if self.steering_is_aligned:
-                self.active_mode = mode
-                self._move_wheels_toward(wheel_targets, dt)
-        elif mode is DriveMode.DIFFERENTIAL:
-            # Differential mode only gates entry. Ackermann steering continues
-            # tracking its targets without interrupting an active maneuver.
-            self._move_wheels_toward(wheel_targets, dt)
-        elif not self.steering_is_aligned:
-            self.sent_speeds = [0.0] * 4
+        self._move_steering_toward(decision.steering_targets, dt)
+        if decision.drive_enabled:
+            self._move_wheels_toward(decision.wheel_targets, dt)
         else:
-            self._move_wheels_toward(wheel_targets, dt)
+            self.sent_speeds = [0.0] * 4
+        if (
+            self.supervisor.phase is TransitionPhase.FAULT
+            and previous_phase is not TransitionPhase.FAULT
+        ):
+            self.get_logger().error(self.supervisor.reason)
 
         self.wheel_pub.publish(Float64MultiArray(data=self.sent_speeds))
         self.steer_pub.publish(Float64MultiArray(data=self.sent_angles))
+
+    def publish_status(self):
+        status = DiagnosticStatus()
+        status.name = self.get_fully_qualified_name() + "/motion"
+        status.hardware_id = self.base_frame
+        if self.supervisor.phase is TransitionPhase.FAULT:
+            status.level = DiagnosticStatus.ERROR
+        elif self.supervisor.reason not in ("", "stopped"):
+            status.level = DiagnosticStatus.WARN
+        else:
+            status.level = DiagnosticStatus.OK
+        status.message = self.supervisor.reason or self.supervisor.phase.value
+        status.values = [
+            KeyValue(
+                key="requested_mode",
+                value=self.requested_mode.value if self.requested_mode else "none",
+            ),
+            KeyValue(
+                key="active_mode",
+                value=self.active_mode.value if self.active_mode else "none",
+            ),
+            KeyValue(key="phase", value=self.supervisor.phase.value),
+            KeyValue(
+                key="max_steering_error", value=str(self.supervisor.max_steering_error)
+            ),
+            KeyValue(key="wheels_stopped", value=str(self.supervisor.wheels_stopped)),
+        ]
+        array = DiagnosticArray()
+        array.header.stamp = self.get_clock().now().to_msg()
+        array.status = [status]
+        self.status_pub.publish(array)
 
     def _move_steering_toward(self, targets, dt):
         maximum_step = self.configuration["max_steering_rate"] * dt
@@ -222,6 +243,7 @@ class SwerveController(Node):
             self.sent_angles = list(angles)
         self.feedback_stamp = stamp
         self.angles = angles
+        self.measured_speeds = speeds
         odom = Odometry()
         odom.header.stamp = msg.header.stamp
         odom.header.frame_id = self.odom_frame

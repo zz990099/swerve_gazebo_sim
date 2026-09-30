@@ -20,7 +20,9 @@ flowchart LR
 
 `kinematics.py` is independent of ROS. It computes wheel commands and fits the body
 twist from measured module states. `controller.py` handles ROS messages, timeouts,
-command limiting and SE(2) pose integration. `bringup.py` validates configuration
+command limiting and SE(2) pose integration. `motion.py` is a ROS-independent,
+simulation-time supervisor for hysteresis, measured-stop confirmation, stable
+alignment, transition deadlines and fault reset. `bringup.py` validates configuration
 and generates controller-manager parameters for each namespace.
 
 The model uses x-forward, y-left and z-up. All wheel joint axes point along local
@@ -52,13 +54,16 @@ Spin accepts pure `wz` and uses the four-wheel X pattern. Crab accepts translati
 with `wz = 0` and keeps all modules parallel. Lateral translation plus yaw is
 unsupported and produces a stop command.
 
-Every mode transition keeps drive speed at zero until all measured steering angles
-reach the new targets. Differential entry is a two-stage transition: steering first
-returns to zero while drive is stopped, then double-Ackermann steering and wheel
-speed commands become active together. Steering error no longer gates drive speed
-after this transition. Spin and crab retain their alignment checks while active.
-Stopping or command timeout immediately zeros drive speed and returns all steering
-targets to zero.
+Every mode transition invalidates the previous active mode. Braking holds steering
+and commands zero wheel speed until all measured wheels stop and the new mode
+request passes its dwell interval. Alignment then moves steering and requires a
+continuous interval of measured alignment before drive becomes active. Differential
+entry aligns at zero steering; steering error does not gate drive after activation.
+Spin and crab retain alignment checks, including a new crab direction. Retargeting
+a pending transition restarts request dwell but preserves its overall deadline.
+Timeout latches a fault until a zero command. Zero commands and watchdogs stop
+drive immediately and return steering home. The `drive_status` DiagnosticArray
+reports requested/active mode, phase, steering error and blocking reason.
 
 For odometry, each measured wheel velocity is projected along its measured steering
 angle. The eight planar components form an overdetermined linear system for the

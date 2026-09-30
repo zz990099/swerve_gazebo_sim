@@ -7,6 +7,7 @@ import xacro
 import yaml
 
 from swerve_gazebo_sim.bringup import (
+    TRANSITION_DEFAULTS,
     controller_config,
     gazebo_variant,
     load_config,
@@ -20,8 +21,7 @@ def test_geometry_has_eight_actuated_joints_and_consistent_dimensions(tmp_path):
     cfg = load_config(ROOT / "config/swerve.yaml")
     wrapper = tmp_path / "chassis_only.urdf.xacro"
     wrapper.write_text(
-        dedent(
-            f"""\
+        dedent(f"""\
             <robot xmlns:xacro="http://www.ros.org/wiki/xacro">
               <xacro:property
                 name="settings"
@@ -36,8 +36,7 @@ def test_geometry_has_eight_actuated_joints_and_consistent_dimensions(tmp_path):
                 control="${{settings['control']}}"
               />
             </robot>
-            """
-        ),
+            """),
         encoding="utf-8",
     )
     root = ET.fromstring(xacro.process_file(str(wrapper)).toxml())
@@ -207,3 +206,14 @@ def test_namespace_and_controller_joint_alignment():
 def test_invalid_namespace():
     with pytest.raises(ValueError):
         names("bad-name", "swerve", "auto")
+
+
+def test_legacy_configuration_gets_transition_defaults(tmp_path):
+    cfg = load_config(ROOT / "config/swerve.yaml")
+    for key in TRANSITION_DEFAULTS:
+        del cfg["control"][key]
+    path = tmp_path / "legacy.yaml"
+    path.write_text(yaml.safe_dump(cfg))
+    loaded = load_config(path)
+    for key, value in TRANSITION_DEFAULTS.items():
+        assert loaded["control"][key] == value

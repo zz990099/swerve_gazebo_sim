@@ -27,11 +27,32 @@ CONTROL = (
     "max_wheel_acceleration",
     "max_steering_rate",
     "steering_alignment_tolerance",
+    "mode_linear_enter_threshold",
+    "mode_linear_exit_threshold",
+    "mode_angular_enter_threshold",
+    "mode_angular_exit_threshold",
+    "mode_dwell_time",
+    "steering_alignment_duration",
+    "mode_switch_timeout",
+    "stopped_wheel_speed",
+    "status_publish_rate",
     "steering_limit",
     "publish_odom_tf",
     "pose_variance",
     "twist_variance",
 )
+
+TRANSITION_DEFAULTS = {
+    "mode_linear_enter_threshold": 0.01,
+    "mode_linear_exit_threshold": 0.005,
+    "mode_angular_enter_threshold": 0.01,
+    "mode_angular_exit_threshold": 0.005,
+    "mode_dwell_time": 0.1,
+    "steering_alignment_duration": 0.05,
+    "mode_switch_timeout": 5.0,
+    "stopped_wheel_speed": 0.05,
+    "status_publish_rate": 10.0,
+}
 
 GAZEBO_VARIANTS = {
     "ign": {
@@ -71,6 +92,9 @@ def load_config(path):
         cfg = yaml.safe_load(stream)
     if not isinstance(cfg, dict) or set(cfg) != {"geometry", "control"}:
         raise ValueError("Configuration must contain geometry and control mappings")
+    if isinstance(cfg["control"], dict):
+        for key, value in TRANSITION_DEFAULTS.items():
+            cfg["control"].setdefault(key, value)
     for section, keys in (("geometry", GEOMETRY), ("control", CONTROL)):
         if not isinstance(cfg[section], dict) or set(cfg[section]) != set(keys):
             raise ValueError(f'{section} must contain exactly: {", ".join(keys)}')
@@ -82,11 +106,16 @@ def load_config(path):
                 isinstance(value, bool)
                 or not isinstance(value, (int, float))
                 or not math.isfinite(value)
-                or value <= 0
+                or value < 0
+                or (
+                    value == 0
+                    and key not in ("mode_dwell_time", "steering_alignment_duration")
+                )
             ):
                 raise ValueError(f"{section}.{key} must be finite and positive")
             else:
                 cfg[section][key] = float(value)
+    validate_control(cfg["control"])
     if not math.isclose(cfg["control"]["steering_limit"], math.pi / 2, abs_tol=1e-9):
         raise ValueError("steering_limit must be pi/2 for this release")
     if not cfg["control"]["update_rate"].is_integer():
@@ -133,3 +162,38 @@ def controller_config(template, cfg, namespace, prefix):
             for corner in ("fl", "fr", "rl", "rr")
         ]
     return {f"{namespace}/{key}": value for key, value in data.items()}
+
+
+def validate_control(configuration):
+    """Validate controller startup parameters, including hysteresis ordering."""
+    for key in CONTROL:
+        value = configuration[key]
+        if key == "publish_odom_tf":
+            if not isinstance(value, bool):
+                raise ValueError("publish_odom_tf must be boolean")
+            continue
+        allow_zero = key in ("mode_dwell_time", "steering_alignment_duration")
+        if (
+            isinstance(value, bool)
+            or not isinstance(value, (int, float))
+            or not math.isfinite(value)
+            or value < 0
+            or (value == 0 and not allow_zero)
+        ):
+            raise ValueError(
+                f"control.{key} must be finite and {'nonnegative' if allow_zero else 'positive'}"
+            )
+    for kind in ("linear", "angular"):
+        if (
+            configuration[f"mode_{kind}_exit_threshold"]
+            >= configuration[f"mode_{kind}_enter_threshold"]
+        ):
+            raise ValueError(f"{kind} exit threshold must be below its enter threshold")
+    if (
+        configuration["mode_switch_timeout"]
+        <= configuration["mode_dwell_time"]
+        + configuration["steering_alignment_duration"]
+    ):
+        raise ValueError(
+            "mode_switch_timeout must exceed dwell plus alignment duration"
+        )

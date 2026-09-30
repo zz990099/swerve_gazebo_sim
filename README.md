@@ -87,6 +87,7 @@ wall-clock emergency stop is outside this simulation package.
 | `odom` | `nav_msgs/Odometry` | Encoder-based planar pose and velocity |
 | `wheel_controller/commands` | `std_msgs/Float64MultiArray` | Internal wheel rad/s, FL FR RL RR |
 | `steering_controller/commands` | `std_msgs/Float64MultiArray` | Internal steering radians, same order |
+| `drive_status` | `diagnostic_msgs/DiagnosticArray` | Requested/active mode, phase and blocking reason |
 | `ground_truth/odom` | `nav_msgs/Odometry` | Optional Gazebo model pose, for validation only |
 
 `swerve_controller` owns `odom → base_footprint`; `robot_state_publisher` owns the
@@ -147,14 +148,38 @@ The controller selects an explicit mode from each body command:
 Lateral translation and yaw cannot be combined. Such a command stops the drive
 and returns steering to zero because it does not belong to any supported mode.
 
-Mode entry uses a steering interlock. Wheel commands remain exactly zero until
-every measured steering angle is within `steering_alignment_tolerance` of its
-target. The default tolerance is 0.05 rad. Differential mode does not reapply the
-interlock after entry: its four steering targets and wheel speeds respond together,
-so steering feedback variation cannot interrupt an active maneuver. Spin and crab
-continue checking their steering targets. Wheel acceleration limiting begins after
-entry. Feedback loss stops wheel commands. These measures reduce transients but do
-not provide real hardware safety.
+Mode entry uses three stages: braking, alignment and active drive. Drive commands
+remain zero until every measured wheel speed is below `stopped_wheel_speed` and
+the requested mode has remained stable for `mode_dwell_time`. Steering is held
+while braking, then moves toward the new target. Every measured steering angle
+must remain within `steering_alignment_tolerance` for
+`steering_alignment_duration` before drive resumes. Differential entry targets
+zero steering; once active, its Ackermann steering tracks the motion command
+without repeatedly gating drive. Spin and crab retain alignment checks, including
+changes of crab direction. Wheel acceleration limiting begins after entry.
+
+Linear and angular enter/exit thresholds filter small command noise and provide
+hysteresis. The lower exit thresholds prevent chatter around a single boundary.
+All timing uses simulation time. Zero commands and watchdogs stop drive immediately;
+they do not wait for the mode dwell. Feedback loss invalidates the active mode.
+These measures reduce transients but do not provide real hardware safety.
+
+| Configuration | Default | Purpose |
+|---|---|---|
+| `mode_linear_enter_threshold` / `mode_linear_exit_threshold` | 0.01 / 0.005 m/s | Translation deadband and hysteresis |
+| `mode_angular_enter_threshold` / `mode_angular_exit_threshold` | 0.01 / 0.005 rad/s | Yaw deadband and hysteresis |
+| `mode_dwell_time` | 0.10 s | Stable mode request before steering |
+| `stopped_wheel_speed` | 0.05 rad/s | Measured stop confirmation for every wheel |
+| `steering_alignment_duration` | 0.05 s | Stable steering alignment before drive |
+| `mode_switch_timeout` | 5.0 s | Overall transition deadline, including retargets |
+| `status_publish_rate` | 10 Hz | Diagnostic publication rate |
+
+The transition settings are optional in older configuration files; omitted fields
+receive these defaults. Dwell and alignment duration can be zero; exit thresholds
+must be below their corresponding enter thresholds. A transition timeout latches
+the fault and keeps drive stopped. Send a zero command before requesting motion
+again. Inspect `ros2 topic echo /drive_status` (or the robot's namespaced topic)
+for the phase and reason; timeouts also emit one error log on fault entry.
 
 Interrupting a transition invalidates the previous active mode. Returning to that
 mode, or selecting a third mode, must pass the new entry interlock before drive

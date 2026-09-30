@@ -8,6 +8,7 @@ from sensor_msgs.msg import JointState
 
 from swerve_gazebo_sim.controller import SwerveController
 from swerve_gazebo_sim.kinematics import DriveMode
+from swerve_gazebo_sim.motion import TransitionPhase
 
 
 class Capture:
@@ -22,11 +23,16 @@ class Capture:
 def node():
     rclpy.init()
     result = SwerveController(
-        parameter_overrides=[Parameter("publish_odom_tf", value=False)]
+        parameter_overrides=[
+            Parameter("publish_odom_tf", value=False),
+            Parameter("mode_dwell_time", value=0.0),
+            Parameter("steering_alignment_duration", value=0.0),
+        ]
     )
     result.wheel_pub = Capture()
     result.steer_pub = Capture()
     result.odom_pub = Capture()
+    result.status_pub = Capture()
     yield result
     result.destroy_node()
     rclpy.shutdown()
@@ -306,3 +312,43 @@ def test_wheel_saturation_and_explicit_stop(node):
     assert node.sent_speeds == pytest.approx([20.0] * 4)
     command(node, 0.0)
     assert tick(node) == [0.0] * 4
+
+
+def test_measured_wheel_motion_holds_steering_during_transition(node):
+    feedback(node, wheel_speeds=[1.0] * 4)
+    command(node, x=0.0, y=0.3)
+    assert tick(node, period=0.1) == [0.0] * 4
+    assert node.sent_angles == [0.0] * 4
+    assert node.supervisor.phase is TransitionPhase.BRAKING
+    feedback(node, wheel_speeds=[0.0] * 4)
+    assert tick(node, period=0.1) == [0.0] * 4
+    assert any(node.sent_angles)
+
+
+def test_drive_status_reports_requested_mode_and_blocking_reason(node):
+    feedback(node, wheel_speeds=[1.0] * 4)
+    command(node, x=0.0, y=0.3)
+    tick(node)
+    node.publish_status()
+    status = node.status_pub.messages[-1].status[0]
+    values = {item.key: item.value for item in status.values}
+    assert values["requested_mode"] == "crab"
+    assert values["active_mode"] == "none"
+    assert values["phase"] == "braking"
+    assert status.message == "waiting_for_wheels_to_stop"
+
+
+def test_timeout_fault_requires_zero_command_before_drive(node):
+    feedback(node)
+    command(node, x=0.0, yaw=0.5)
+    tick(node)
+    node.supervisor._transition_since -= 6.0
+    assert tick(node) == [0.0] * 4
+    assert node.supervisor.phase is TransitionPhase.FAULT
+    command(node, x=0.3)
+    assert tick(node) == [0.0] * 4
+    command(node, x=0.0)
+    tick(node)
+    assert node.supervisor.phase is TransitionPhase.IDLE
+    command(node, x=0.3)
+    assert any(tick(node))
