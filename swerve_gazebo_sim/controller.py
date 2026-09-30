@@ -1,3 +1,4 @@
+#!/usr/bin/env python3
 # SPDX-License-Identifier: Apache-2.0
 """ROS adapter for bounded steering, wheel commands and encoder odometry."""
 
@@ -12,9 +13,9 @@ from sensor_msgs.msg import JointState
 from std_msgs.msg import Float64MultiArray
 from tf2_ros import TransformBroadcaster
 
-from .bringup import TRANSITION_DEFAULTS, validate_control
-from .kinematics import SwerveKinematics, integrate_pose
-from .motion import MotionSupervisor, TransitionPhase
+from swerve_gazebo_sim.bringup import TRANSITION_DEFAULTS, validate_control
+from swerve_gazebo_sim.kinematics import SwerveKinematics, integrate_pose
+from swerve_gazebo_sim.motion import MotionSupervisor, TransitionPhase
 
 
 class SwerveController(Node):
@@ -283,3 +284,7 @@ def main(args=None):
         node.destroy_node()
         if rclpy.ok():
             rclpy.shutdown()
+
+
+if __name__ == "__main__":
+    main()
