@@ -11,6 +11,23 @@ ROS odometry bridge. Runtime odometry remains a wheel/steering kinematic estimat
 Launch uses one generic bridge and exposes independent Odometry/TF output settings.
 The dated records below describe the configuration used at that time.
 
+## Feedback ordering and clock epoch regression (2026-10-02, 0.2.2)
+
+A delayed JointState within the feedback freshness window previously reset pose
+when its header stamp was older than the last accepted observation, even if ROS
+time had not rolled back. The callback now rejects older/repeated observations
+using original integer nanoseconds. It integrates elapsed integer nanoseconds, so
+adjacent stamps remain distinguishable at large epochs. Rejected observations do
+not change measured state, cancel commands or publish odometry/TF.
+
+All runtime callbacks observe the ROS clock independently of message headers.
+A real clock rollback clears command, feedback and odometry state in either
+control mode and resets the internal supervisor when present. The drive timer
+does not clear new-epoch feedback if another callback already observed the reset.
+Regression cases cover older/repeated stamps, one-nanosecond intervals at a large
+epoch, clock resets first observed by feedback/status/the drive timer, and a reset
+with malformed feedback. Real ROS callback tests run in both distribution CI jobs.
+
 ## Interrupted transition regression (2026-09-30)
 
 The previous controller could resume differential drive before steering returned

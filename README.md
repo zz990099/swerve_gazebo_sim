@@ -268,7 +268,10 @@ four-module kinematics for their fixed spin pattern and parallel steering direct
 Odometry uses measured wheel velocities and steering positions with a least-squares
 rigid-body fit, then feeds SE(2) integration. It starts at zero regardless of spawn
 pose. Covariance is a configurable nominal diagonal, not an estimated uncertainty.
-Simulation resets clear command/odometry state; feedback gaps are not extrapolated.
+An observed ROS clock rollback clears command/odometry state in either control
+mode. Older or repeated JointState stamps within the same clock epoch are ignored
+without resetting pose or publishing odometry/TF. Ordering and integration intervals
+use integer nanoseconds, including at large time epochs. Feedback gaps are not extrapolated.
 Reinitialize external consumers after a world reset.
 
 The Gazebo position/velocity interfaces are idealized actuators. The model includes

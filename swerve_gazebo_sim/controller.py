@@ -93,8 +93,9 @@ class SwerveController(Node):
         self.active_mode = None
         self.steering_is_aligned = True
         self.pose = (0.0, 0.0, 0.0)
-        self.previous_odom_stamp = None
-        self.last_tick = self.get_clock().now().nanoseconds * 1e-9
+        self.previous_odom_stamp_ns = None
+        self._last_clock_ns = self.get_clock().now().nanoseconds
+        self.last_tick = self._last_clock_ns * 1e-9
         self.wheel_pub = (
             self.create_publisher(Float64MultiArray, "wheel_controller/commands", 10)
             if not self.external_joint_control
@@ -124,10 +125,30 @@ class SwerveController(Node):
             1.0 / self.configuration["status_publish_rate"], self.publish_status
         )
 
+    def _observe_clock(self, now_ns):
+        # Message ordering does not establish a world reset. Only an observed
+        # ROS clock rollback clears the current epoch, in either control mode.
+        if now_ns < self._last_clock_ns:
+            self.command_stamp = None
+            self.feedback_stamp = None
+            self.previous_odom_stamp_ns = None
+            self.pose = (0.0, 0.0, 0.0)
+            self.sent_speeds = [0.0] * 4
+            self.requested_mode = None
+            self.active_mode = None
+            if self.supervisor is not None:
+                self.supervisor.reset()
+            # A feedback/status callback may observe the rollback before the
+            # drive timer. Do not reset newly accepted feedback a second time.
+            self.last_tick = now_ns * 1e-9
+        self._last_clock_ns = now_ns
+
     def on_command(self, msg):
         if self.external_joint_control:
             return
-        now = self.get_clock().now().nanoseconds * 1e-9
+        now_ns = self.get_clock().now().nanoseconds
+        self._observe_clock(now_ns)
+        now = now_ns * 1e-9
         stamp = msg.header.stamp.sec + msg.header.stamp.nanosec * 1e-9
         values = (msg.twist.linear.x, msg.twist.linear.y, msg.twist.angular.z)
         # Empty frame means base frame; a zero stamp explicitly uses reception time.
@@ -149,15 +170,11 @@ class SwerveController(Node):
     def on_timer(self):
         if self.external_joint_control:
             return  # The external profile publisher exclusively owns joint commands.
-        now = self.get_clock().now().nanoseconds * 1e-9
+        now_ns = self.get_clock().now().nanoseconds
+        self._observe_clock(now_ns)
+        now = now_ns * 1e-9
         dt = now - self.last_tick
         self.last_tick = now
-        if dt < 0:
-            self.command_stamp = None
-            self.feedback_stamp = None
-            self.previous_odom_stamp = None
-            self.pose = (0.0, 0.0, 0.0)
-            self.supervisor.reset()
         dt = max(0.0, min(dt, 0.1))
         command_is_current = self.command_stamp is not None and (
             0 <= now - self.command_stamp <= self.configuration["cmd_timeout"]
@@ -196,11 +213,13 @@ class SwerveController(Node):
         self.steer_pub.publish(Float64MultiArray(data=self.sent_angles))
 
     def publish_status(self):
+        now_ns = self.get_clock().now().nanoseconds
+        self._observe_clock(now_ns)
         status = DiagnosticStatus()
         status.name = self.get_fully_qualified_name() + "/motion"
         status.hardware_id = self.base_frame
         if self.external_joint_control:
-            now = self.get_clock().now().nanoseconds * 1e-9
+            now = now_ns * 1e-9
             current = self.feedback_stamp is not None and (
                 0 <= now - self.feedback_stamp <= self.configuration["feedback_timeout"]
             )
@@ -264,6 +283,8 @@ class SwerveController(Node):
             self.sent_speeds[module_index] += step
 
     def on_feedback(self, msg):
+        now_ns = self.get_clock().now().nanoseconds
+        self._observe_clock(now_ns)
         try:
             wheel_indices = [msg.name.index(name) for name in self.wheel_joint_names]
             steering_indices = [
@@ -274,24 +295,26 @@ class SwerveController(Node):
             twist = self.kinematics.forward(speeds, angles)
         except (ValueError, IndexError):
             return
-        now = self.get_clock().now().nanoseconds * 1e-9
-        stamp = msg.header.stamp.sec + msg.header.stamp.nanosec * 1e-9
-        if stamp - now > 0.1 or now - stamp > self.configuration["feedback_timeout"]:
+        stamp_ns = msg.header.stamp.sec * 1_000_000_000 + msg.header.stamp.nanosec
+        age_s = (now_ns - stamp_ns) * 1e-9
+        if (
+            stamp_ns < 0
+            or age_s < -0.1
+            or age_s > self.configuration["feedback_timeout"]
+        ):
             return
-        if self.previous_odom_stamp is not None:
-            dt = stamp - self.previous_odom_stamp
-            if dt < 0:
-                self.pose = (0.0, 0.0, 0.0)
-                self.command_stamp = None
-            elif dt == 0:
+        if self.previous_odom_stamp_ns is not None:
+            elapsed_ns = stamp_ns - self.previous_odom_stamp_ns
+            if elapsed_ns <= 0:
                 return
-            elif dt <= self.configuration["feedback_timeout"]:
+            dt = elapsed_ns * 1e-9
+            if dt <= self.configuration["feedback_timeout"]:
                 self.pose = integrate_pose(self.pose, twist, dt)
             # A gap does not justify extrapolating an unobserved trajectory.
-        self.previous_odom_stamp = stamp
+        self.previous_odom_stamp_ns = stamp_ns
         if self.feedback_stamp is None:
             self.sent_angles = list(angles)
-        self.feedback_stamp = stamp
+        self.feedback_stamp = stamp_ns * 1e-9
         self.angles = angles
         self.measured_speeds = speeds
         odom = Odometry()

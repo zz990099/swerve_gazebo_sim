@@ -4,6 +4,7 @@ import pytest
 import rclpy
 from geometry_msgs.msg import TwistStamped
 from rclpy.parameter import Parameter
+from rclpy.time import Time
 from sensor_msgs.msg import JointState
 
 import swerve_gazebo_sim.controller as controller_module
@@ -52,6 +53,167 @@ def feedback(node, steering_angles=None, wheel_speeds=None):
     msg.velocity = list(wheel_speeds) + [0.0] * 4
     node.on_feedback(msg)
     return msg
+
+
+@pytest.fixture(params=[False, True], ids=["internal", "external"])
+def clocked_node(request, monkeypatch):
+    class Clock:
+        nanoseconds = 1_800_000_001_200_000_000
+
+        def now(self):
+            return Time(nanoseconds=self.nanoseconds)
+
+    transforms = []
+
+    class Broadcaster:
+        def __init__(self, node):
+            del node
+
+        def sendTransform(self, transform):
+            transforms.append(transform)
+
+    monkeypatch.setattr(controller_module, "TransformBroadcaster", Broadcaster)
+    rclpy.init()
+    node = SwerveController(
+        parameter_overrides=[
+            Parameter("external_joint_control", value=request.param),
+        ]
+    )
+    clock = Clock()
+    monkeypatch.setattr(node, "get_clock", lambda: clock)
+    node._last_clock_ns = clock.nanoseconds
+    node.last_tick = clock.nanoseconds * 1e-9
+    node.wheel_pub = Capture()
+    node.steer_pub = Capture()
+    node.odom_pub = Capture()
+    node.status_pub = Capture()
+    try:
+        yield node, clock, transforms
+    finally:
+        node.destroy_node()
+        rclpy.shutdown()
+
+
+def stamped_feedback(node, stamp_ns, wheel_speed=2.0, angle=0.0):
+    msg = JointState()
+    msg.header.stamp = Time(nanoseconds=stamp_ns).to_msg()
+    msg.name = node.wheel_joint_names + node.steering_joint_names
+    msg.position = [0.0] * 4 + [angle] * 4
+    msg.velocity = [wheel_speed] * 4 + [0.0] * 4
+    node.on_feedback(msg)
+
+
+@pytest.mark.parametrize("backward_ns", [0, 1, 10_000_000])
+def test_old_feedback_does_not_reset_or_replace_current_state(
+    clocked_node, backward_ns
+):
+    node, clock, transforms = clocked_node
+    stamp_ns = clock.nanoseconds - 100_000_000
+    stamped_feedback(node, stamp_ns)
+    node.pose = (5.0, 0.0, 0.0)
+    node.command_stamp = node.feedback_stamp
+    previous = (
+        node.pose,
+        node.command_stamp,
+        node.feedback_stamp,
+        node.previous_odom_stamp_ns,
+        list(node.angles),
+        list(node.measured_speeds),
+        list(node.sent_angles),
+    )
+    stamped_feedback(node, stamp_ns - backward_ns, wheel_speed=9.0, angle=0.5)
+    assert (
+        node.pose,
+        node.command_stamp,
+        node.feedback_stamp,
+        node.previous_odom_stamp_ns,
+        node.angles,
+        node.measured_speeds,
+        node.sent_angles,
+    ) == previous
+    assert len(node.odom_pub.messages) == len(transforms) == 1
+    stamped_feedback(node, clock.nanoseconds)
+    assert node.pose == pytest.approx((5.02, 0.0, 0.0))
+    assert len(node.odom_pub.messages) == len(transforms) == 2
+
+
+def test_adjacent_new_nanosecond_is_integrated_at_large_epoch(clocked_node):
+    node, clock, transforms = clocked_node
+    stamp_ns = clock.nanoseconds - 100_000_000
+    stamped_feedback(node, stamp_ns)
+    stamped_feedback(node, stamp_ns + 1)
+    assert node.previous_odom_stamp_ns == stamp_ns + 1
+    assert node.pose[0] == pytest.approx(0.2e-9, abs=1e-15)
+    assert len(node.odom_pub.messages) == len(transforms) == 2
+
+
+@pytest.mark.parametrize("observer", ["feedback", "status"])
+def test_real_clock_rollback_starts_new_epoch_in_both_modes(clocked_node, observer):
+    node, clock, transforms = clocked_node
+    stamped_feedback(node, clock.nanoseconds)
+    node.pose = (5.0, 0.0, 0.0)
+    node.command_stamp = node.feedback_stamp
+    node.sent_speeds = [2.0] * 4
+    if node.supervisor is not None:
+        node.supervisor.phase = TransitionPhase.ACTIVE
+    clock.nanoseconds = 100_000_000
+    if observer == "status":
+        node.publish_status()
+        assert node.feedback_stamp is None
+        assert node.previous_odom_stamp_ns is None
+        assert node.pose == (0.0, 0.0, 0.0)
+    stamped_feedback(node, clock.nanoseconds, wheel_speed=0.0, angle=0.3)
+    assert node.command_stamp is None
+    assert node.pose == (0.0, 0.0, 0.0)
+    assert node.previous_odom_stamp_ns == clock.nanoseconds
+    assert node.sent_angles == [0.3] * 4
+    assert node.sent_speeds == [0.0] * 4
+    if node.supervisor is not None:
+        assert node.supervisor.phase is TransitionPhase.IDLE
+    node.on_timer()
+    assert node.previous_odom_stamp_ns == clock.nanoseconds
+    assert node.feedback_stamp is not None
+    assert len(node.odom_pub.messages) == len(transforms) == 2
+
+
+def test_clock_rollback_invalidates_state_even_with_partial_feedback(clocked_node):
+    node, clock, transforms = clocked_node
+    stamped_feedback(node, clock.nanoseconds)
+    node.pose = (5.0, 0.0, 0.0)
+    node.command_stamp = node.feedback_stamp
+    clock.nanoseconds = 100_000_000
+    node.on_feedback(JointState())
+    assert node.pose == (0.0, 0.0, 0.0)
+    assert node.command_stamp is None
+    assert node.feedback_stamp is None
+    assert node.previous_odom_stamp_ns is None
+    assert len(node.odom_pub.messages) == len(transforms) == 1
+
+
+def test_drive_timer_can_observe_clock_reset_before_feedback(node, monkeypatch):
+    feedback(node)
+    node.pose = (5.0, 0.0, 0.0)
+    node.command_stamp = node.feedback_stamp
+
+    class Clock:
+        nanoseconds = 100_000_000
+
+        def now(self):
+            return Time(nanoseconds=self.nanoseconds)
+
+    clock = Clock()
+    monkeypatch.setattr(node, "get_clock", lambda: clock)
+    node.on_timer()
+    assert node.command_stamp is None
+    assert node.feedback_stamp is None
+    assert node.previous_odom_stamp_ns is None
+    assert node.pose == (0.0, 0.0, 0.0)
+    assert node.wheel_pub.messages[-1].data == [0.0] * 4
+    feedback(node, steering_angles=[0.3] * 4)
+    clock.nanoseconds += 10_000_000
+    node.on_timer()
+    assert node.previous_odom_stamp_ns == 100_000_000
+    assert node.feedback_stamp is not None
 
 
 def test_external_control_preserves_odometry_without_command_ownership():
@@ -427,8 +589,10 @@ def test_odometry_outputs_are_independent_and_use_configured_names(
             assert node.odom_pub.topic_name == "/robot1/wheel/odometry"
             node.odom_pub = messages
         first = feedback(node, wheel_speeds=[3.0] * 4)
-        node.previous_odom_stamp = (
-            first.header.stamp.sec + first.header.stamp.nanosec * 1e-9 - 0.05
+        node.previous_odom_stamp_ns = (
+            first.header.stamp.sec * 1_000_000_000
+            + first.header.stamp.nanosec
+            - 50_000_000
         )
         feedback(node, wheel_speeds=[3.0] * 4)
         assert node.pose[0] > 0
