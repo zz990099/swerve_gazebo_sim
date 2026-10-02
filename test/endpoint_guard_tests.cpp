@@ -25,6 +25,26 @@ int main() {
     auto moving = packet(1, 2, false, 1.01, 10.01, 2);
     out = guard.update(1.01, 10.01, measured, moving);
     check(!guard.fault() && out.wheels[0] == 2);
+    {
+      EndpointGuard handshake;
+      auto arm = packet(1, 1, true, 1, 10);
+      handshake.update(1, 10, measured, arm);
+      arm.receipt += 1;
+      arm.received_wall_s = 10.01;
+      handshake.update(1.01, 10.01, measured, arm);
+      check(!handshake.fault() && handshake.sequence() == 1);
+      // Even repeated arm traffic cannot renew its original deadline.
+      arm.receipt += 1;
+      arm.received_wall_s = 10.031;
+      out = handshake.update(1.031, 10.031, measured, arm);
+      check(handshake.fault() && out.wheels[0] == 0);
+      EndpointGuard changed_arm;
+      changed_arm.update(1, 10, measured, packet(1, 1, true, 1, 10));
+      auto changed = packet(1, 1, true, 1.01, 10.01);
+      ++changed.receipt;
+      changed_arm.update(1.01, 10.01, measured, changed);
+      check(changed_arm.fault()); // Refreshing an arm stamp is not an exact retry.
+    }
     // Publisher exit: update still runs, wheel targets zero without any callback.
     out = guard.update(1.041, 10.041, measured);
     check(guard.fault() && out.wheels[0] == 0);

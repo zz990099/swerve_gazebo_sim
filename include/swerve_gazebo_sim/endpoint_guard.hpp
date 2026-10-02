@@ -80,6 +80,12 @@ public:
       for (std::size_t i = 0; i < 4; ++i)
         valid = valid && std::abs(d[5 + i]) <= limits_.steering_limit_rad + 1e-9 &&
                 std::abs(d[9 + i]) <= limits_.max_wheel_speed_radps + 1e-9;
+      // A depth-one transport may drop the first arm before a control update.
+      // An identical zero-wheel arm can be retransmitted pending ACK. It is a
+      // no-op after admission and NEVER extends either deadline. Once any newer
+      // sequence is admitted, the old arm is a replay like any other packet.
+      if (valid && !fault_ && d[2] == 1 && d == arm_data_ && d[1] == sequence_)
+        return targets_;
       if (valid && d[2] == 1) {
         valid = fault_ && !discontinuity && d[0] > session_;
         for (std::size_t i = 0; i < 4; ++i)
@@ -87,6 +93,7 @@ public:
                   std::abs(measured.wheels[i]) <= limits_.stopped_wheel_radps &&
                   std::abs(d[5 + i] - measured.steering[i]) <= limits_.arm_steering_tolerance_rad;
         if (valid) {
+          arm_data_ = d;
           session_ = d[0];
           sequence_ = 0;
           stamp_s_ = -1;
@@ -124,6 +131,7 @@ public:
 private:
   EndpointLimits limits_;
   EndpointTargets targets_;
+  std::array<double, 14> arm_data_{};
   bool fault_ = true;
   double session_ = 0, sequence_ = 0, stamp_s_ = -1, valid_until_s_ = -1;
   double received_wall_s_ = -1, last_sim_s_ = -1, last_wall_s_ = -1;

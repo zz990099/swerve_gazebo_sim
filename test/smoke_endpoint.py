@@ -72,20 +72,20 @@ class Probe(Node):
 
     def send(self, session, sequence, arm, angles, speed):
         now = self.now()
-        self.publisher.publish(
-            Float64MultiArray(
-                data=[
-                    float(session),
-                    float(sequence),
-                    float(arm),
-                    now,
-                    now + 0.03,
-                    *angles,
-                    *([speed] * 4),
-                    1.0,
-                ]
-            )
+        message = Float64MultiArray(
+            data=[
+                float(session),
+                float(sequence),
+                float(arm),
+                now,
+                now + 0.03,
+                *angles,
+                *([speed] * 4),
+                1.0,
+            ]
         )
+        self.publisher.publish(message)
+        return message
 
     def wait(self, condition, timeout=30):
         deadline = time.monotonic() + timeout
@@ -122,15 +122,19 @@ def worker(node, session, no_arm):
     angles, _ = node.encoders()
     sequence = 1
     if not no_arm:
-        node.send(session, sequence, True, angles, 0.0)
+        arm_message = node.send(session, sequence, True, angles, 0.0)
     arm_stamp = node.now()
     deadline = time.monotonic() + 30
     while time.monotonic() < deadline:
         rclpy.spin_once(node, timeout_sec=0.002)
-        sequence += 1
-        # Immediately stream zero targets pending the arm acknowledgement, so
-        # status delivery does not consume the short command validity window.
         armed = node.status[0] == session and node.status[2] == 0
+        if not armed and not no_arm:
+            # Retransmit the identical frozen arm; a normal packet must not
+            # overwrite it before the depth-one receiver sees the handshake.
+            node.publisher.publish(arm_message)
+            time.sleep(0.002)
+            continue
+        sequence += 1
         speed = 2.0 if no_arm else min(2.0, max(0.0, node.now() - arm_stamp) * 4)
         node.send(session, sequence, False, angles, speed if armed or no_arm else 0.0)
         time.sleep(0.002)

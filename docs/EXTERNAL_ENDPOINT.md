@@ -54,10 +54,13 @@ reconfiguration/reactivation of that plugin instance.
 
 Arm requires a new session, finite measured wheels <= stopped_wheel_speed (default
 0.05 rad/s), exactly zero requested wheel speeds, and steering within 0.05 rad of
-measured positions. Send the arm once, then immediately stream fresh zero commands
-while awaiting acknowledgement. If delivery is lost or the validity deadline is
-missed, stop, verify the plant, and arm with another newer session. Do not blindly
-retry the same arm or stream Drive while awaiting acknowledgement. An arm in the
+measured positions. Repeat the identical frozen zero-wheel arm packet
+while awaiting acknowledgement; unchanged retries before any later accepted
+sequence are no-ops and do not extend either deadline. After acknowledgement,
+stream fresh samples. If delivery is lost or the validity deadline is
+missed, stop, verify the plant, and arm with another newer session. Do not refresh
+an arm timestamp, revive an expired same-session arm, or stream Drive while awaiting
+acknowledgement. An arm in the
 same update as a clock rollback is rejected; recover on a later healthy tick.
 The MPPI owner must also verify stopped body motion/confirmed mode and reset its
 Controller, TimedExecutor and ProfileRunner; this endpoint cannot infer that state.
