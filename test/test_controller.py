@@ -208,7 +208,7 @@ def test_drive_timer_can_observe_clock_reset_before_feedback(node, monkeypatch):
     assert node.feedback_stamp is None
     assert node.previous_odom_stamp_ns is None
     assert node.pose == (0.0, 0.0, 0.0)
-    assert node.wheel_pub.messages[-1].data == [0.0] * 4
+    assert list(node.wheel_pub.messages[-1].data) == [0.0] * 4
     feedback(node, steering_angles=[0.3] * 4)
     clock.nanoseconds += 10_000_000
     node.on_timer()
