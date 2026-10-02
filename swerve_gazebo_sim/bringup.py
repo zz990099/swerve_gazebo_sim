@@ -178,6 +178,24 @@ def controller_config(template, cfg, namespace, prefix):
             f"{prefix}{corner}_{joint_type}_joint"
             for corner in ("fl", "fr", "rl", "rr")
         ]
+    if cfg["control"]["external_joint_control"]:
+        manager = data["controller_manager"]["ros__parameters"]
+        del manager["steering_controller"], manager["wheel_controller"]
+        manager["guarded_joint_controller"] = {
+            "type": "swerve_gazebo_sim/GuardedJointController"
+        }
+        guarded = {"use_sim_time": True}
+        for kind in ("steering", "wheel"):
+            guarded[f"{kind}_joints"] = data[f"{kind}_controller"]["ros__parameters"][
+                "joints"
+            ]
+            del data[f"{kind}_controller"]
+        guarded.update(
+            max_wheel_speed_radps=cfg["control"]["max_wheel_speed"],
+            steering_limit_rad=cfg["control"]["steering_limit"],
+            stopped_wheel_radps=cfg["control"]["stopped_wheel_speed"],
+        )
+        data["guarded_joint_controller"] = {"ros__parameters": guarded}
     return {f"{namespace}/{key}": value for key, value in data.items()}
 
 

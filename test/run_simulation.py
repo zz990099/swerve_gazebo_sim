@@ -62,6 +62,7 @@ def stop_descendants(tracked):
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--multi", action="store_true")
+    parser.add_argument("--external", action="store_true")
     parser.add_argument(
         "--gazebo-version",
         choices=("ign", "gz"),
@@ -69,6 +70,8 @@ def main():
     )
     parser.add_argument("--logs", default=None)
     args = parser.parse_args()
+    if args.multi and args.external:
+        parser.error("--external currently validates one protected endpoint")
     directory = Path(args.logs or tempfile.mkdtemp(prefix="swerve_validation_"))
     directory.mkdir(parents=True, exist_ok=True)
     processes = []
@@ -98,12 +101,18 @@ def main():
             "headless:=true",
             "publish_ground_truth:=true",
         ]
+        if args.external:
+            command += ["external_joint_control:=true"]
         if args.multi:
             command += ["namespace:=robot1", "robot_name:=robot1"]
         start("demo.log", command)
         probe = [
             sys.executable,
-            str(Path(__file__).with_name("smoke_motion.py")),
+            str(
+                Path(__file__).with_name(
+                    "smoke_endpoint.py" if args.external else "smoke_motion.py"
+                )
+            ),
             "--gazebo-version",
             args.gazebo_version,
         ]

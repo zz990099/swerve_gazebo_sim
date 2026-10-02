@@ -1,0 +1,7 @@
+<library path="guarded_joint_controller">
+  <class name="swerve_gazebo_sim/GuardedJointController"
+         type="swerve_gazebo_sim::GuardedJointController"
+         base_class_type="controller_interface::ControllerInterface">
+    <description>Exclusive atomic joint endpoint with simulation deadlines and a steady-clock watchdog.</description>
+  </class>
+</library>

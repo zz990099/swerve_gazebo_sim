@@ -88,6 +88,10 @@ def spawn_setup(context, variant):
         LaunchConfiguration("prefix").perform(context),
     )
     configuration = load_config(config_file)
+    # Select interface ownership before generating ros2_control configuration.
+    configuration["control"].update(
+        external_control_parameters(context, configuration["control"])
+    )
 
     controller_template = os.path.join(
         package_share,
@@ -186,8 +190,11 @@ def spawn_setup(context, variant):
         output="screen",
         arguments=[
             "joint_state_broadcaster",
-            "steering_controller",
-            "wheel_controller",
+            *(
+                ["guarded_joint_controller"]
+                if configuration["control"]["external_joint_control"]
+                else ["steering_controller", "wheel_controller"]
+            ),
             "--controller-manager",
             f"{namespace}/controller_manager",
             "--controller-manager-timeout",

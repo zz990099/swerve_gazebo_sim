@@ -103,6 +103,13 @@ jobs:
           source install/setup.bash
           python3 src/swerve_gazebo_sim/test/run_simulation.py \
             --gazebo-version "${{ matrix.family }}" --logs artifacts/single
+      - name: External protected endpoint publisher-loss test
+        working-directory: workspace
+        run: |
+          source "/opt/ros/${ROS_DISTRO}/setup.bash"
+          source install/setup.bash
+          python3 src/swerve_gazebo_sim/test/run_simulation.py \
+            --gazebo-version "${{ matrix.family }}" --external --logs artifacts/external
       - name: Upload build, test and simulation logs
         if: always()
         uses: actions/upload-artifact@v4
@@ -113,3 +120,4 @@ jobs:
             workspace/build/swerve_gazebo_sim/test_results/
             workspace/artifacts/
           if-no-files-found: warn
+
