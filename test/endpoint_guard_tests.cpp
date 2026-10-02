@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-#include "swerve_gazebo_sim/endpoint_guard.hpp"
+#include "swerve_gazebo_sim/command_write.hpp"
 #include <iostream>
 #include <limits>
 using namespace swerve_gazebo_sim;
@@ -18,6 +18,45 @@ EndpointPacket packet(double session, double sequence, bool arm, double sim, dou
 }
 int main() {
   try {
+    struct BoolInterface {
+      double value = 99;
+      bool fail_once = false;
+      bool set_value(double next) {
+        if (fail_once) {
+          fail_once = false;
+          return false;
+        }
+        value = next;
+        return true;
+      }
+    };
+    struct VoidInterface {
+      double value = 99;
+      void set_value(double next) { value = next; }
+    };
+    const std::array<std::size_t, 8> order{7, 6, 5, 4, 3, 2, 1, 0};
+    std::array<BoolInterface, 8> bool_interfaces;
+    std::array<VoidInterface, 8> void_interfaces;
+    EndpointTargets target;
+    target.steering.fill(.2);
+    target.wheels.fill(3);
+    check(write_joint_targets(void_interfaces, order, target));
+    check(void_interfaces[0].value == 3 && void_interfaces[7].value == .2);
+    bool_interfaces[7].fail_once = true;
+    check(!write_joint_targets(bool_interfaces, order, target));
+    check(bool_interfaces[0].value == 3); // Later writes must still be attempted.
+    EndpointGuard write_fault;
+    EndpointTargets stopped;
+    write_fault.update(1, 10, stopped, packet(1, 1, true, 1, 10));
+    target = write_fault.update(1.01, 10.01, stopped, packet(1, 2, false, 1.01, 10.01, 3));
+    bool_interfaces[0].fail_once = true;
+    if (!write_joint_targets(bool_interfaces, order, target)) {
+      write_fault.deactivate();
+      check(write_joint_targets(bool_interfaces, order, write_fault.update(1.01, 10.01, stopped)));
+    }
+    check(write_fault.fault());
+    for (std::size_t i = 0; i < 4; ++i)
+      check(bool_interfaces[order[i + 4]].value == 0);
     EndpointTargets measured;
     EndpointGuard guard;
     auto out = guard.update(1, 10, measured, packet(1, 1, true, 1, 10));

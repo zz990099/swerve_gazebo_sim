@@ -4,7 +4,7 @@
 #include "realtime_tools/realtime_buffer.h"
 #include "std_msgs/msg/float64_multi_array.hpp"
 #include "std_msgs/msg/u_int64_multi_array.hpp"
-#include "swerve_gazebo_sim/endpoint_guard.hpp"
+#include "swerve_gazebo_sim/command_write.hpp"
 #include <atomic>
 #include <chrono>
 #include <string>
@@ -113,21 +113,28 @@ public:
     guard_->deactivate();
     // Discard commands received while inactive. An explicit new arm is required.
     activation_receipt_ = receipt_.load();
-    write(guard_->update(get_node()->now().seconds(), wall_now(), measured()));
+    if (!write(guard_->update(get_node()->now().seconds(), wall_now(), measured())))
+      return controller_interface::CallbackReturn::ERROR;
     return controller_interface::CallbackReturn::SUCCESS;
   }
   controller_interface::CallbackReturn on_deactivate(const rclcpp_lifecycle::State &) override {
     guard_->deactivate();
-    write(guard_->update(get_node()->now().seconds(), wall_now(), measured()));
+    if (!write(guard_->update(get_node()->now().seconds(), wall_now(), measured())))
+      return controller_interface::CallbackReturn::ERROR;
     return controller_interface::CallbackReturn::SUCCESS;
   }
   controller_interface::return_type update(const rclcpp::Time &time,
                                            const rclcpp::Duration &) override {
     const auto packet = *buffer_.readFromRT();
-    write(guard_->update(time.seconds(), wall_now(), measured(),
-                         packet.receipt > activation_receipt_
-                             ? std::optional<EndpointPacket>(packet)
-                             : std::nullopt));
+    const auto targets =
+        guard_->update(time.seconds(), wall_now(), measured(),
+                       packet.receipt > activation_receipt_ ? std::optional<EndpointPacket>(packet)
+                                                            : std::nullopt);
+    if (!write(targets)) {
+      guard_->deactivate();
+      // Retry stopped targets immediately and on every subsequent faulted tick.
+      write(guard_->update(time.seconds(), wall_now(), measured()));
+    }
     ++status_version_;
     status_session_ = guard_->session();
     status_sequence_ = guard_->sequence();
@@ -150,11 +157,8 @@ private:
     }
     return state;
   }
-  void write(const EndpointTargets &targets) {
-    for (std::size_t i = 0; i < 4; ++i) {
-      command_interfaces_[command_index_[i]].set_value(targets.steering[i]);
-      command_interfaces_[command_index_[i + 4]].set_value(targets.wheels[i]);
-    }
+  bool write(const EndpointTargets &targets) {
+    return write_joint_targets(command_interfaces_, command_index_, targets);
   }
   std::vector<std::string> interfaces_;
   std::array<std::size_t, 8> command_index_{}, state_index_{};

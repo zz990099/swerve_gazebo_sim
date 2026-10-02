@@ -44,7 +44,9 @@ last accepted session/sequence. This protocol is not an authentication boundary.
 ## Fault and recovery
 
 Simulation expiry, wall expiry, backward/invalid clocks, invalid feedback,
-malformed packets, replay, wrong session or inadmissible targets latch a stop.
+malformed packets, replay, wrong session, inadmissible targets or reported
+command-interface write failure latch a stop. On a write failure the controller
+immediately retries stopped targets and continues retrying on subsequent ticks.
 Expiry is checked before accepting a newer target, so a late packet cannot conceal
 a missed deadline. Every update while faulted commands zero wheels and holds
 bounded measured steering; corrupt angles never propagate NaN to command interfaces.
