@@ -113,13 +113,21 @@ int main(int argc, char **argv) {
           true);
     };
     arm(1);
+    std_msgs::msg::Float64MultiArray drive;
+    const double drive_time = controller->get_node()->now().seconds();
+    drive.data = {1, 2, 0, drive_time, drive_time + .03, 0, 0, 0, 0, 2, 2, 2, 2, 1};
+    const auto drive_count = messages;
+    publisher->publish(drive);
+    wait([&]() { return messages > drive_count && status[1] == 2 && status[2] == 0; }, true);
+    for (std::size_t i = 4; i < 8; ++i)
+      require(commands[i] == 2, "test must stop previously nonzero wheel commands");
     require(controller->get_node()->deactivate().label() == "inactive", "deactivate failed");
     const auto stopped_count = messages;
     // Deliberately NO update calls: an inactive controller's timer must publish
     // the lifecycle snapshot, rather than repeatedly sending its old healthy
     // ACK.
     wait([&]() { return messages >= stopped_count + 3 && status[2] == 1 && status[3] == 1; });
-    require(status[0] == 1 && status[1] == 1, "deactivation must preserve accepted history");
+    require(status[0] == 1 && status[1] == 2, "deactivation must preserve accepted history");
     for (std::size_t i = 4; i < 8; ++i)
       require(commands[i] == 0, "deactivation must zero every wheel command");
     const auto activation_count = messages;
