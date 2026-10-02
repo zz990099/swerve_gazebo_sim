@@ -7,6 +7,10 @@ vendor meshes or application-specific messages. Each steering module has a bound
 double-Ackermann driving, pure spin and crab translation in either direction.
 Lateral translation combined with yaw is deliberately unsupported.
 
+Version 0.2.1 refreshes protected endpoint status during lifecycle changes.
+Inactive/reactivated controllers report Disarmed without needing a control update;
+ROS plugin lifecycle regressions run on both supported distributions.
+
 ## Supported environment
 
 The launch interface has two explicit Gazebo families:

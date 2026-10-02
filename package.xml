@@ -1,7 +1,7 @@
 <?xml version="1.0"?>
 <package format="3">
   <name>swerve_gazebo_sim</name>
-  <version>0.2.0</version>
+  <version>0.2.1</version>
   <description>Independent four-module swerve chassis simulation for ROS 2 and Gazebo.</description>
   <maintainer email="188520056629@163.com">Binfeng Zhang</maintainer>
   <license>Apache-2.0</license>
@@ -37,6 +37,8 @@
   <test_depend>ament_cmake_pytest</test_depend>
   <test_depend>python3-pytest</test_depend>
   <test_depend>python3-psutil</test_depend>
+  <test_depend>rclcpp</test_depend>
+  <test_depend>hardware_interface</test_depend>
 
   <export>
     <build_type>ament_cmake</build_type>

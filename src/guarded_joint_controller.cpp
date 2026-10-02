@@ -63,6 +63,7 @@ public:
     } catch (const std::exception &) {
       return controller_interface::CallbackReturn::ERROR;
     }
+    publish_status_snapshot(get_node()->now().seconds());
     subscription_ = get_node()->create_subscription<std_msgs::msg::Float64MultiArray>(
         "~/commands", rclcpp::QoS(1).best_effort().durability_volatile(),
         [this](const std_msgs::msg::Float64MultiArray::SharedPtr message) {
@@ -78,7 +79,8 @@ public:
     status_publisher_ =
         get_node()->create_publisher<std_msgs::msg::UInt64MultiArray>("~/status", 1);
     status_timer_ = get_node()->create_wall_timer(std::chrono::milliseconds(10), [this]() {
-      // Allocation and ROS publication stay outside the controller update thread.
+      // Allocation and ROS publication stay outside the controller update
+      // thread.
       for (int attempt = 0; attempt < 3; ++attempt) {
         const auto version = status_version_.load();
         if (version % 2)
@@ -91,10 +93,10 @@ public:
         if (version == status_version_.load()) {
           status_publisher_->publish(msg);
           if (msg.data[2] && msg.data[3] != logged_reason_) {
-            RCLCPP_WARN(
-                get_node()->get_logger(),
-                "Endpoint fault reason=%llu sim=%.9f sample=%.9f deadline=%.9f wall_age=%.6f",
-                static_cast<unsigned long long>(msg.data[3]), sim, source, deadline, age);
+            RCLCPP_WARN(get_node()->get_logger(),
+                        "Endpoint fault reason=%llu sim=%.9f sample=%.9f "
+                        "deadline=%.9f wall_age=%.6f",
+                        static_cast<unsigned long long>(msg.data[3]), sim, source, deadline, age);
           }
           logged_reason_ = msg.data[2] ? msg.data[3] : 0;
           break;
@@ -122,15 +124,26 @@ public:
         return controller_interface::CallbackReturn::ERROR;
     }
     guard_->deactivate();
-    // Discard commands received while inactive. An explicit new arm is required.
+    // Discard commands received while inactive. An explicit new arm is
+    // required.
     activation_receipt_ = receipt_.load();
-    if (!write(guard_->update(get_node()->now().seconds(), wall_now(), measured())))
+    const double sim = get_node()->now().seconds();
+    const bool written = write(guard_->update(sim, wall_now(), measured()));
+    if (!written)
+      guard_->deactivate(EndpointFault::WriteFailure);
+    publish_status_snapshot(sim);
+    if (!written)
       return controller_interface::CallbackReturn::ERROR;
     return controller_interface::CallbackReturn::SUCCESS;
   }
   controller_interface::CallbackReturn on_deactivate(const rclcpp_lifecycle::State &) override {
     guard_->deactivate();
-    if (!write(guard_->update(get_node()->now().seconds(), wall_now(), measured())))
+    const double sim = get_node()->now().seconds();
+    const bool written = write(guard_->update(sim, wall_now(), measured()));
+    if (!written)
+      guard_->deactivate(EndpointFault::WriteFailure);
+    publish_status_snapshot(sim);
+    if (!written)
       return controller_interface::CallbackReturn::ERROR;
     return controller_interface::CallbackReturn::SUCCESS;
   }
@@ -146,21 +159,27 @@ public:
       // Retry stopped targets immediately and on every subsequent faulted tick.
       write(guard_->update(time.seconds(), wall_now(), measured()));
     }
+    publish_status_snapshot(time.seconds(), &packet);
+    // A guard fault is a safe command, not permission to release the
+    // interfaces.
+    return controller_interface::return_type::OK;
+  }
+
+private:
+  // Lifecycle callbacks and update are serialized by the controller manager.
+  // The timer reads atomics only; it must never touch the live guard state.
+  void publish_status_snapshot(double sim, const EndpointPacket *packet = nullptr) {
     ++status_version_;
     status_session_ = guard_->session();
     status_sequence_ = guard_->sequence();
     status_fault_ = guard_->fault() ? 1 : 0;
     status_reason_ = static_cast<std::uint64_t>(guard_->fault_reason());
-    status_sim_ = time.seconds();
-    status_source_ = packet.data[3];
-    status_deadline_ = packet.data[4];
-    status_wall_age_ = packet.receipt ? wall_now() - packet.received_wall_s : -1;
+    status_sim_ = sim;
+    status_source_ = packet ? packet->data[3] : 0;
+    status_deadline_ = packet ? packet->data[4] : 0;
+    status_wall_age_ = packet && packet->receipt ? wall_now() - packet->received_wall_s : -1;
     ++status_version_;
-    // A guard fault is a safe command, not permission to release the interfaces.
-    return controller_interface::return_type::OK;
   }
-
-private:
   static double wall_now() {
     return std::chrono::duration<double>(std::chrono::steady_clock::now().time_since_epoch())
         .count();

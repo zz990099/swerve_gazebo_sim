@@ -28,11 +28,18 @@ install(
 
 if(BUILD_TESTING)
   find_package(ament_cmake_pytest REQUIRED)
+  find_package(rclcpp REQUIRED)
+  find_package(hardware_interface REQUIRED)
   add_executable(endpoint_guard_tests test/endpoint_guard_tests.cpp)
   target_compile_features(endpoint_guard_tests PRIVATE cxx_std_17)
   target_include_directories(endpoint_guard_tests PRIVATE include)
   target_compile_options(endpoint_guard_tests PRIVATE -Wall -Wextra -Wpedantic -Werror)
   add_test(NAME endpoint_guard COMMAND endpoint_guard_tests)
+  add_executable(controller_lifecycle_tests test/controller_lifecycle_tests.cpp)
+  target_compile_features(controller_lifecycle_tests PRIVATE cxx_std_17)
+  ament_target_dependencies(controller_lifecycle_tests controller_interface pluginlib std_msgs rclcpp hardware_interface)
+  add_test(NAME controller_lifecycle COMMAND controller_lifecycle_tests)
+  set_tests_properties(controller_lifecycle PROPERTIES TIMEOUT 30)
 
   ament_add_pytest_test(endpoint_config test/test_endpoint_config.py)
   ament_add_pytest_test(kinematics test/test_kinematics.py)

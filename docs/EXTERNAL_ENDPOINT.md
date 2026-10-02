@@ -56,6 +56,11 @@ bounded measured steering; corrupt angles never propagate NaN to command interfa
 The guard remains in control while faulted, rather than releasing the interfaces.
 Deactivation also writes zero wheels; session high-water marks survive lifecycle
 reconfiguration/reactivation of that plugin instance.
+Configure, activation and deactivation refresh the status snapshot without needing
+a control update. An inactive controller therefore reports Disarmed while its wall
+timer keeps publishing, instead of repeating an old healthy acknowledgement.
+Reported lifecycle command write failures publish WriteFailure. Reactivation alone
+never arms the endpoint; a new stopped-session handshake remains required.
 
 Arm requires a new session, finite measured wheels <= stopped_wheel_speed (default
 0.05 rad/s), exactly zero requested wheel speeds, and steering within 0.05 rad of
@@ -83,6 +88,9 @@ braking curve or a guarantee of zero physical stopping distance.
 
 The standalone C++ guard test covers publisher silence, paused clock, deadline gaps,
 old sessions/replay, explicit stopped recovery, invalid data and clock rollback.
+The ROS plugin lifecycle test loads the actual plugin, assigns loaned interfaces,
+uses ROS commands/status transport and checks inactive status with no update calls,
+reactivation, cleanup/reconfigure and session history on both ROS distributions.
 Both ROS/Gazebo CI variants additionally run:
 
 ```bash
