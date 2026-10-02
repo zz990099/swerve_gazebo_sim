@@ -11,7 +11,8 @@
 #include <vector>
 
 namespace swerve_gazebo_sim {
-static_assert(std::atomic<std::uint64_t>::is_always_lock_free,
+static_assert(std::atomic<std::uint64_t>::is_always_lock_free &&
+                  std::atomic<double>::is_always_lock_free,
               "endpoint requires lock-free 64-bit atomics");
 class GuardedJointController : public controller_interface::ControllerInterface {
 public:
@@ -83,9 +84,19 @@ public:
         if (version % 2)
           continue;
         std_msgs::msg::UInt64MultiArray msg;
-        msg.data = {status_session_.load(), status_sequence_.load(), status_fault_.load()};
+        msg.data = {status_session_.load(), status_sequence_.load(), status_fault_.load(),
+                    status_reason_.load()};
+        const double sim = status_sim_.load(), source = status_source_.load(),
+                     deadline = status_deadline_.load(), age = status_wall_age_.load();
         if (version == status_version_.load()) {
           status_publisher_->publish(msg);
+          if (msg.data[2] && msg.data[3] != logged_reason_) {
+            RCLCPP_WARN(
+                get_node()->get_logger(),
+                "Endpoint fault reason=%llu sim=%.9f sample=%.9f deadline=%.9f wall_age=%.6f",
+                static_cast<unsigned long long>(msg.data[3]), sim, source, deadline, age);
+          }
+          logged_reason_ = msg.data[2] ? msg.data[3] : 0;
           break;
         }
       }
@@ -131,7 +142,7 @@ public:
                        packet.receipt > activation_receipt_ ? std::optional<EndpointPacket>(packet)
                                                             : std::nullopt);
     if (!write(targets)) {
-      guard_->deactivate();
+      guard_->deactivate(EndpointFault::WriteFailure);
       // Retry stopped targets immediately and on every subsequent faulted tick.
       write(guard_->update(time.seconds(), wall_now(), measured()));
     }
@@ -139,6 +150,11 @@ public:
     status_session_ = guard_->session();
     status_sequence_ = guard_->sequence();
     status_fault_ = guard_->fault() ? 1 : 0;
+    status_reason_ = static_cast<std::uint64_t>(guard_->fault_reason());
+    status_sim_ = time.seconds();
+    status_source_ = packet.data[3];
+    status_deadline_ = packet.data[4];
+    status_wall_age_ = packet.receipt ? wall_now() - packet.received_wall_s : -1;
     ++status_version_;
     // A guard fault is a safe command, not permission to release the interfaces.
     return controller_interface::return_type::OK;
@@ -170,7 +186,9 @@ private:
   std::atomic<std::uint64_t> receipt_{0};
   std::uint64_t activation_receipt_ = 0;
   std::atomic<std::uint64_t> status_version_{0}, status_session_{0}, status_sequence_{0},
-      status_fault_{1};
+      status_fault_{1}, status_reason_{1};
+  std::atomic<double> status_sim_{0}, status_source_{0}, status_deadline_{0}, status_wall_age_{-1};
+  std::uint64_t logged_reason_ = 0; // Only the non-real-time timer touches this.
 };
 } // namespace swerve_gazebo_sim
 PLUGINLIB_EXPORT_CLASS(swerve_gazebo_sim::GuardedJointController,

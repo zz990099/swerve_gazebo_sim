@@ -18,6 +18,16 @@ struct EndpointPacket {
   std::uint64_t receipt = 0;
   bool malformed = false;
 };
+enum class EndpointFault : std::uint64_t {
+  None,
+  Disarmed,
+  Clock,
+  Feedback,
+  SimulationDeadline,
+  WallWatchdog,
+  CommandRejected,
+  WriteFailure
+};
 struct EndpointTargets {
   std::array<double, 4> steering{};
   std::array<double, 4> wheels{};
@@ -41,8 +51,12 @@ public:
       if (!std::isfinite(v) || v <= 0)
         throw std::invalid_argument("endpoint limits must be finite and positive");
   }
-  void deactivate() { fault_ = true; } // Session high-water mark survives lifecycle changes.
+  void deactivate(EndpointFault reason = EndpointFault::Disarmed) {
+    fault_ = true;
+    reason_ = reason;
+  } // Session high-water mark survives lifecycle changes.
   bool fault() const { return fault_; }
+  EndpointFault fault_reason() const { return reason_; }
   std::uint64_t session() const { return static_cast<std::uint64_t>(session_); }
   std::uint64_t sequence() const { return static_cast<std::uint64_t>(sequence_); }
   EndpointTargets update(double sim_s, double wall_s, const EndpointTargets &measured,
@@ -55,10 +69,14 @@ public:
                     std::isfinite(measured.steering[i]) &&
                     std::abs(measured.steering[i]) <= limits_.steering_limit_rad + 1e-9;
     const bool discontinuity = !clocks_ok;
-    if (!clocks_ok || !feedback_ok ||
-        (!fault_ &&
-         (sim_s > valid_until_s_ + 1e-9 || wall_s - received_wall_s_ >= limits_.wall_timeout_s)))
-      fault_ = true;
+    if (!clocks_ok)
+      latch(EndpointFault::Clock);
+    if (!feedback_ok)
+      latch(EndpointFault::Feedback);
+    if (!fault_ && sim_s > valid_until_s_ + 1e-9)
+      latch(EndpointFault::SimulationDeadline);
+    if (!fault_ && wall_s - received_wall_s_ >= limits_.wall_timeout_s)
+      latch(EndpointFault::WallWatchdog);
     // A clock reset requires a later healthy stopped arm tick, never a packet
     // that conceals the reset on the same update.
     if (std::isfinite(sim_s) && sim_s >= 0)
@@ -98,13 +116,14 @@ public:
           sequence_ = 0;
           stamp_s_ = -1;
           fault_ = false;
+          reason_ = EndpointFault::None;
         }
       } else if (valid) {
         valid = !fault_ && d[0] == session_;
       }
       valid = valid && d[1] > sequence_ && d[3] >= stamp_s_;
       if (!valid)
-        fault_ = true;
+        latch(EndpointFault::CommandRejected);
       else {
         sequence_ = d[1];
         stamp_s_ = d[3];
@@ -129,6 +148,12 @@ public:
   }
 
 private:
+  void latch(EndpointFault reason) {
+    if (!fault_ || reason_ == EndpointFault::Disarmed)
+      reason_ = reason;
+    fault_ = true;
+  }
+  EndpointFault reason_ = EndpointFault::Disarmed;
   EndpointLimits limits_;
   EndpointTargets targets_;
   std::array<double, 14> arm_data_{};

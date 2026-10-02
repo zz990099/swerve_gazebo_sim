@@ -51,10 +51,10 @@ int main() {
     target = write_fault.update(1.01, 10.01, stopped, packet(1, 2, false, 1.01, 10.01, 3));
     bool_interfaces[0].fail_once = true;
     if (!write_joint_targets(bool_interfaces, order, target)) {
-      write_fault.deactivate();
+      write_fault.deactivate(EndpointFault::WriteFailure);
       check(write_joint_targets(bool_interfaces, order, write_fault.update(1.01, 10.01, stopped)));
     }
-    check(write_fault.fault());
+    check(write_fault.fault() && write_fault.fault_reason() == EndpointFault::WriteFailure);
     for (std::size_t i = 0; i < 4; ++i)
       check(bool_interfaces[order[i + 4]].value == 0);
     EndpointTargets measured;
@@ -89,6 +89,7 @@ int main() {
     check(guard.fault() && out.wheels[0] == 0);
     out = guard.update(1.05, 10.05, measured, packet(1, 3, false, 1.05, 10.05, 2));
     check(guard.fault() && out.wheels[0] == 0);
+    check(guard.fault_reason() == EndpointFault::SimulationDeadline);
     // Same session cannot re-arm. A moving plant cannot re-arm either.
     guard.update(1.06, 10.06, measured, packet(1, 4, true, 1.06, 10.06));
     check(guard.fault());
@@ -101,6 +102,7 @@ int main() {
     // Paused simulation cannot suspend the independent wall watchdog.
     out = guard.update(1.08, 10.19, measured);
     check(guard.fault() && out.wheels[0] == 0);
+    check(guard.fault_reason() == EndpointFault::WallWatchdog);
     // Expiry BEFORE new admission prevents a fresh target hiding the gap.
     guard.update(2, 11, measured, packet(3, 1, true, 2, 11));
     out = guard.update(2.04, 11.04, measured, packet(3, 2, false, 2.04, 11.04, 3));

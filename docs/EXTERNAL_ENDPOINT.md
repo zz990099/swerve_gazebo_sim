@@ -35,8 +35,11 @@ profiles. The endpoint bounds joint targets but does not revalidate obstacles,
 body acceleration, mode semantics, or the profile's source task.
 
 `guarded_joint_controller/status` publishes UInt64MultiArray
-`[accepted_session, accepted_sequence, fault(0/1)]` outside the real-time update.
-It is acknowledgement/diagnostic data, not vehicle-mode confirmation. Check its
+`[accepted_session, accepted_sequence, fault(0/1), reason]` outside the real-time update.
+Reason codes are 0 none, 1 disarmed, 2 clock, 3 feedback, 4 simulation deadline,
+5 wall watchdog, 6 rejected command and 7 interface write failure. Fault transitions
+also log sample/deadline/current simulation times and wall receipt age outside the
+real-time update. It is acknowledgement/diagnostic data, not vehicle-mode confirmation. Check its
 freshness and match the session; stopped encoders alone do not prove an arm was
 accepted. Invalid commands can fault the endpoint even if they do not advance the
 last accepted session/sequence. This protocol is not an authentication boundary.

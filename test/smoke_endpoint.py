@@ -94,7 +94,10 @@ class Probe(Node):
             if condition():
                 return
             if time.monotonic() > deadline:
-                raise AssertionError("Endpoint/feedback acceptance deadline exceeded")
+                raise AssertionError(
+                    f"Endpoint deadline exceeded: status={self.status}, sim={self.now():.6f}, "
+                    f"encoders={self.encoders() if self.joints else None}"
+                )
             time.sleep(0.001)
 
     def stopped(self):
@@ -112,6 +115,55 @@ class Probe(Node):
         self.destroy_node()
 
 
+def arm_and_confirm(node, first_session):
+    # Before emitting any Drive, allow bounded startup retries after a lost/late
+    # handshake, each with verified stopped feedback and a strictly newer session.
+    # This never retries a fault after motion has been authorized.
+    session = first_session
+    for attempt in range(8):
+        node.wait(
+            lambda: max(map(abs, node.encoders()[1])) <= 0.05
+            and abs(
+                node.now()
+                - (
+                    node.joints.header.stamp.sec
+                    + node.joints.header.stamp.nanosec * 1e-9
+                )
+            )
+            < 0.02
+        )
+        session = max(session, node.status[0] + 1)
+        angles, _ = node.encoders()
+        sequence = 1
+        arm_message = node.send(session, sequence, True, angles, 0.0)
+        print(
+            f"ARM attempt={attempt} session={session} sim={node.now():.6f} status={node.status}",
+            flush=True,
+        )
+        deadline_wall = time.monotonic() + 0.2
+        while time.monotonic() < deadline_wall:
+            rclpy.spin_once(node, timeout_sec=0.001)
+            healthy = node.status[0] == session and node.status[2] == 0
+            if healthy:
+                if node.status[1] > 1:
+                    print(
+                        f"ACK session={session} seq={node.status[1]} sim={node.now():.6f}",
+                        flush=True,
+                    )
+                    return session, sequence, angles
+                sequence += 1
+                node.send(session, sequence, False, angles, 0.0)
+            elif node.now() > arm_message.data[4]:
+                break
+            else:
+                node.publisher.publish(arm_message)
+            time.sleep(0.001)
+        session += 1
+    raise AssertionError(
+        f"Startup arm failed after stopped retries: status={node.status}"
+    )
+
+
 def worker(node, session, no_arm):
     node.wait(
         lambda: node.joints is not None
@@ -119,25 +171,23 @@ def worker(node, session, no_arm):
         and node.now() > 0
         and node.publisher.get_subscription_count() == 1
     )
-    angles, _ = node.encoders()
-    sequence = 1
-    if not no_arm:
-        arm_message = node.send(session, sequence, True, angles, 0.0)
-    arm_stamp = node.now()
+    if no_arm:
+        angles, _ = node.encoders()
+        sequence = 1
+    else:
+        session, sequence, angles = arm_and_confirm(node, session)
+    drive_stamp = node.now()
     deadline = time.monotonic() + 30
     while time.monotonic() < deadline:
-        rclpy.spin_once(node, timeout_sec=0.002)
-        armed = node.status[0] == session and node.status[2] == 0
-        if not armed and not no_arm:
-            # Retransmit the identical frozen arm; a normal packet must not
-            # overwrite it before the depth-one receiver sees the handshake.
-            node.publisher.publish(arm_message)
-            time.sleep(0.002)
-            continue
+        rclpy.spin_once(node, timeout_sec=0.001)
+        if not no_arm and (node.status[0] != session or node.status[2] != 0):
+            raise AssertionError(
+                f"Fault while streaming Drive: status={node.status} sim={node.now():.6f}"
+            )
         sequence += 1
-        speed = 2.0 if no_arm else min(2.0, max(0.0, node.now() - arm_stamp) * 4)
-        node.send(session, sequence, False, angles, speed if armed or no_arm else 0.0)
-        time.sleep(0.002)
+        speed = 2.0 if no_arm else min(2.0, max(0.0, node.now() - drive_stamp) * 4)
+        node.send(session, sequence, False, angles, speed)
+        time.sleep(0.001)
     raise AssertionError("Publisher was not killed by the acceptance test")
 
 
@@ -172,7 +222,7 @@ def acceptance(node, args):
 
     def moving(session):
         return (
-            node.status[0] == session
+            node.status[0] >= session
             and node.status[2] == 0
             and min(node.encoders()[1]) > 1.5
             and node.truth.latest.twist.twist.linear.x > 0.12
@@ -192,6 +242,9 @@ def acceptance(node, args):
         first_session = node.status[0] + 1
         first = start(first_session)
         node.wait(lambda: moving(first_session))
+        first_session = node.status[
+            0
+        ]  # Startup retries may have consumed earlier sessions.
         kill_and_check(first)
         stale = start(first_session, no_arm=True)
         start_sim = node.now()
