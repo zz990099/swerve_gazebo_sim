@@ -20,6 +20,7 @@ GEOMETRY = (
     "steering_mass",
 )
 CONTROL = (
+    "external_joint_control",
     "update_rate",
     "cmd_timeout",
     "feedback_timeout",
@@ -64,6 +65,7 @@ ODOMETRY_DEFAULTS = {
     "odom_frame": "",
     "odom_child_frame": "",
 }
+COMMAND_DEFAULTS = {"external_joint_control": False}
 
 GAZEBO_VARIANTS = {
     "ign": {
@@ -102,13 +104,17 @@ def load_config(path):
     if not isinstance(cfg, dict) or set(cfg) != {"geometry", "control"}:
         raise ValueError("Configuration must contain geometry and control mappings")
     if isinstance(cfg["control"], dict):
-        for key, value in {**TRANSITION_DEFAULTS, **ODOMETRY_DEFAULTS}.items():
+        for key, value in {
+            **TRANSITION_DEFAULTS,
+            **ODOMETRY_DEFAULTS,
+            **COMMAND_DEFAULTS,
+        }.items():
             cfg["control"].setdefault(key, value)
     for section, keys in (("geometry", GEOMETRY), ("control", CONTROL)):
         if not isinstance(cfg[section], dict) or set(cfg[section]) != set(keys):
             raise ValueError(f'{section} must contain exactly: {", ".join(keys)}')
         for key, value in cfg[section].items():
-            if key in ("publish_odom", "publish_odom_tf"):
+            if key in ("publish_odom", "publish_odom_tf", "external_joint_control"):
                 if not isinstance(value, bool):
                     raise ValueError(f"{key} must be boolean")
             elif key in ("odom_topic", "odom_frame", "odom_child_frame"):
@@ -179,7 +185,7 @@ def validate_control(configuration):
     """Validate controller startup parameters, including hysteresis ordering."""
     for key in CONTROL:
         value = configuration[key]
-        if key in ("publish_odom", "publish_odom_tf"):
+        if key in ("publish_odom", "publish_odom_tf", "external_joint_control"):
             if not isinstance(value, bool):
                 raise ValueError(f"{key} must be boolean")
             continue

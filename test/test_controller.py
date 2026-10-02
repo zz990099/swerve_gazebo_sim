@@ -54,6 +54,44 @@ def feedback(node, steering_angles=None, wheel_speeds=None):
     return msg
 
 
+def test_external_control_preserves_odometry_without_command_ownership():
+    rclpy.init()
+    node = SwerveController(
+        parameter_overrides=[
+            Parameter("external_joint_control", value=True),
+            Parameter("publish_odom_tf", value=False),
+        ]
+    )
+    try:
+        assert node.supervisor is None
+        assert node.wheel_pub is None
+        assert node.steer_pub is None
+        node.wheel_pub = Capture()
+        node.steer_pub = Capture()
+        node.odom_pub = Capture()
+        node.status_pub = Capture()
+        feedback(node, wheel_speeds=[2.0] * 4)
+        assert node.odom_pub.messages[-1].twist.twist.linear.x == pytest.approx(0.2)
+        msg = TwistStamped()
+        msg.twist.linear.x = 1.0
+        node.on_command(msg)
+        node.on_timer()
+        assert not node.wheel_pub.messages
+        assert not node.steer_pub.messages
+        assert node.command_stamp is None
+        assert node.requested_mode is None
+        assert node.active_mode is None
+        node.publish_status()
+        status = node.status_pub.messages[-1].status[0]
+        assert status.message == "external joint control"
+        assert [(item.key, item.value) for item in status.values] == [
+            ("command_owner", "external")
+        ]
+    finally:
+        node.destroy_node()
+        rclpy.shutdown()
+
+
 def command(node, x=0.5, y=0.0, yaw=0.0):
     msg = TwistStamped()
     msg.twist.linear.x = x

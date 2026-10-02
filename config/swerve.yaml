@@ -27,6 +27,10 @@ geometry:
   steering_mass: 0.2
 
 control:
+  # true: disable cmd_vel mode inference, joint publishers and all internal ramps.
+  # An external MPPI adapter owns both command topics and its independent watchdog.
+  # Encoder odometry/TF and feedback diagnostics remain available.
+  external_joint_control: false
   # Hz; positive integer shared by the Python control timer and controller_manager.
   # The bundled world steps physics at 200 Hz; increasing this does not change it.
   update_rate: 100.0

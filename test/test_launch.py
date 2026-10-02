@@ -35,6 +35,7 @@ def test_version_specific_launch_has_no_runtime_version_argument(
     assert {
         "bridge_config",
         "start_bridge",
+        "external_joint_control",
         "publish_odom",
         "odom_topic",
         "publish_odom_tf",
@@ -98,3 +99,23 @@ def test_empty_odometry_launch_values_use_yaml():
     result = launch_support.odometry_parameters(context, configuration)
     assert result["publish_odom_tf"] is False
     assert result["odom_topic"] == "custom/odom"
+
+
+@pytest.mark.parametrize(
+    "override,expected", [("", True), ("true", True), ("false", False)]
+)
+def test_external_control_override(override, expected):
+    context = LaunchContext()
+    context.launch_configurations["external_joint_control"] = override
+    assert launch_support.external_control_parameters(
+        context, {"external_joint_control": True}
+    ) == {"external_joint_control": expected}
+
+
+def test_external_control_override_requires_boolean():
+    context = LaunchContext()
+    context.launch_configurations["external_joint_control"] = "yes"
+    with pytest.raises(ValueError, match="external_joint_control"):
+        launch_support.external_control_parameters(
+            context, {"external_joint_control": False}
+        )

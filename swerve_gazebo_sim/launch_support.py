@@ -31,6 +31,23 @@ from .bringup import ODOMETRY_DEFAULTS, controller_config, load_config, names
 PACKAGE_NAME = "swerve_gazebo_sim"
 
 
+def external_control_launch_argument():
+    return DeclareLaunchArgument(
+        "external_joint_control",
+        default_value="",
+        description="External owner publishes sampled joint profiles; empty uses YAML",
+    )
+
+
+def external_control_parameters(context, configuration):
+    value = LaunchConfiguration("external_joint_control").perform(context)
+    if not value:
+        return {"external_joint_control": configuration["external_joint_control"]}
+    if value.lower() not in ("true", "false"):
+        raise ValueError("external_joint_control must be true or false")
+    return {"external_joint_control": value.lower() == "true"}
+
+
 def odometry_launch_arguments():
     descriptions = {
         "publish_odom": "Publish kinematic Odometry; empty uses YAML",
@@ -195,6 +212,9 @@ def spawn_setup(context, variant):
     controller_node_parameters.update(
         odometry_parameters(context, configuration["control"])
     )
+    controller_node_parameters.update(
+        external_control_parameters(context, configuration["control"])
+    )
     swerve_controller = Node(
         executable=sys.executable,
         arguments=["-m", "swerve_gazebo_sim.controller"],
@@ -330,6 +350,7 @@ def generate_spawn_launch_description(variant):
     )
     for argument in odometry_launch_arguments():
         launch_description.add_action(argument)
+    launch_description.add_action(external_control_launch_argument())
     launch_description.add_action(declare_namespace)
     launch_description.add_action(declare_prefix)
     launch_description.add_action(declare_robot_name)
@@ -379,6 +400,9 @@ def demo_setup(context, variant):
             "config": LaunchConfiguration("config").perform(context),
             "bridge_config": LaunchConfiguration("bridge_config").perform(context),
             "start_bridge": LaunchConfiguration("start_bridge").perform(context),
+            "external_joint_control": LaunchConfiguration(
+                "external_joint_control"
+            ).perform(context),
             **{
                 key: LaunchConfiguration(key).perform(context)
                 for key in (*ODOMETRY_DEFAULTS, "publish_odom_tf")
@@ -487,6 +511,7 @@ def generate_demo_launch_description(variant):
     )
     for argument in odometry_launch_arguments():
         launch_description.add_action(argument)
+    launch_description.add_action(external_control_launch_argument())
     launch_description.add_action(declare_namespace)
     launch_description.add_action(declare_prefix)
     launch_description.add_action(declare_robot_name)

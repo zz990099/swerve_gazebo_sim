@@ -18,6 +18,21 @@ from swerve_gazebo_sim.bringup import (
 ROOT = Path(__file__).resolve().parents[1]
 
 
+def test_external_control_configuration_defaults_and_type(tmp_path):
+    config = yaml.safe_load((ROOT / "config/swerve.yaml").read_text())
+    del config["control"]["external_joint_control"]
+    path = tmp_path / "legacy.yaml"
+    path.write_text(yaml.safe_dump(config))
+    assert load_config(path)["control"]["external_joint_control"] is False
+    config["control"]["external_joint_control"] = True
+    path.write_text(yaml.safe_dump(config))
+    assert load_config(path)["control"]["external_joint_control"] is True
+    config["control"]["external_joint_control"] = "true"
+    path.write_text(yaml.safe_dump(config))
+    with pytest.raises(ValueError, match="external_joint_control"):
+        load_config(path)
+
+
 def test_geometry_has_eight_actuated_joints_and_consistent_dimensions(tmp_path):
     cfg = load_config(ROOT / "config/swerve.yaml")
     wrapper = tmp_path / "chassis_only.urdf.xacro"

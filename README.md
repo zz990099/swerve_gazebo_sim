@@ -97,6 +97,35 @@ velocities and steering angles in `controller.py`, without Gazebo truth input.
 
 ## Configuration and multiple robots
 
+### External joint control for MPPI
+
+Start with `external_joint_control:=true` (or set `control.external_joint_control`
+in YAML). Both Gazebo families and both demo/spawn entry points support it:
+
+```bash
+ros2 launch swerve_gazebo_sim demo_gz.launch.py headless:=true external_joint_control:=true
+# Fortress: use demo_ign.launch.py with the same arguments.
+```
+
+In this mode `swerve_controller` publishes odometry/TF and feedback health only.
+It creates no joint command publishers, cmd_vel subscription or motion supervisor;
+its status reports `command_owner=external` and does not invent MPPI mode feedback.
+One external controller must own both command topics. Publish FL/FR/RL/RR wheel
+rad/s and steering radians from `swerve_mppi::ProfileRunner`, consuming only checked
+`TimedExecutor` results at a high actuator rate. Map mode feedback from that executor,
+convert measured joint rad/s to wheel m/s, and align observations to the actual
+application instant. Match geometry, steering stops and rate limits to this model.
+Do not pass MPPI through cmd_vel: the default internal mode inference and ramps
+do not implement the MPPI full-tick joint profile.
+
+The external owner must run an independent wall-clock watchdog and emergency stop;
+ros2_control forward command controllers can retain the last target after publisher
+silence. This option alone provides no stop guarantee. The portable profile helper
+rejects missed ticks, stale profiles and clock rollback when called, but cannot stop
+a dead process. A complete ROS MPPI node and physical braking/slip/latency calibration
+remain separate integration work. Encoder odometry is not independent ground truth.
+
+
 `config/swerve.yaml` is the geometry and motion-limit source used by both model
 generation and control. Copy it and pass `config:=/absolute/path/custom.yaml`.
 All fields are startup parameters; restart after changing geometry. Launch validates

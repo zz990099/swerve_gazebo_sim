@@ -13,6 +13,7 @@ from std_msgs.msg import Float64MultiArray
 from tf2_ros import TransformBroadcaster
 
 from swerve_gazebo_sim.bringup import (
+    COMMAND_DEFAULTS,
     ODOMETRY_DEFAULTS,
     TRANSITION_DEFAULTS,
     validate_control,
@@ -38,6 +39,7 @@ class SwerveController(Node):
             "steering_alignment_tolerance": 0.05,
             **TRANSITION_DEFAULTS,
             **ODOMETRY_DEFAULTS,
+            **COMMAND_DEFAULTS,
             "publish_odom_tf": True,
             "pose_variance": 0.02,
             "twist_variance": 0.02,
@@ -55,7 +57,12 @@ class SwerveController(Node):
             self.configuration["wheel_radius"],
             self.configuration["steering_limit"],
         )
-        self.supervisor = MotionSupervisor(self.kinematics, self.configuration)
+        self.external_joint_control = self.configuration["external_joint_control"]
+        self.supervisor = (
+            None
+            if self.external_joint_control
+            else MotionSupervisor(self.kinematics, self.configuration)
+        )
         self.measured_speeds = [0.0] * 4
         corners = ("fl", "fr", "rl", "rr")
         self.wheel_joint_names = [
@@ -88,11 +95,15 @@ class SwerveController(Node):
         self.pose = (0.0, 0.0, 0.0)
         self.previous_odom_stamp = None
         self.last_tick = self.get_clock().now().nanoseconds * 1e-9
-        self.wheel_pub = self.create_publisher(
-            Float64MultiArray, "wheel_controller/commands", 10
+        self.wheel_pub = (
+            self.create_publisher(Float64MultiArray, "wheel_controller/commands", 10)
+            if not self.external_joint_control
+            else None
         )
-        self.steer_pub = self.create_publisher(
-            Float64MultiArray, "steering_controller/commands", 10
+        self.steer_pub = (
+            self.create_publisher(Float64MultiArray, "steering_controller/commands", 10)
+            if not self.external_joint_control
+            else None
         )
         self.odom_pub = (
             self.create_publisher(Odometry, self.configuration["odom_topic"], 10)
@@ -105,14 +116,17 @@ class SwerveController(Node):
             if self.configuration["publish_odom_tf"]
             else None
         )
-        self.create_subscription(TwistStamped, "cmd_vel", self.on_command, 10)
+        if not self.external_joint_control:
+            self.create_subscription(TwistStamped, "cmd_vel", self.on_command, 10)
+            self.create_timer(1.0 / self.configuration["update_rate"], self.on_timer)
         self.create_subscription(JointState, "joint_states", self.on_feedback, 10)
-        self.create_timer(1.0 / self.configuration["update_rate"], self.on_timer)
         self.create_timer(
             1.0 / self.configuration["status_publish_rate"], self.publish_status
         )
 
     def on_command(self, msg):
+        if self.external_joint_control:
+            return
         now = self.get_clock().now().nanoseconds * 1e-9
         stamp = msg.header.stamp.sec + msg.header.stamp.nanosec * 1e-9
         values = (msg.twist.linear.x, msg.twist.linear.y, msg.twist.angular.z)
@@ -133,6 +147,8 @@ class SwerveController(Node):
         self.command_stamp = now if stamp == 0 else stamp
 
     def on_timer(self):
+        if self.external_joint_control:
+            return  # The external profile publisher exclusively owns joint commands.
         now = self.get_clock().now().nanoseconds * 1e-9
         dt = now - self.last_tick
         self.last_tick = now
@@ -183,6 +199,23 @@ class SwerveController(Node):
         status = DiagnosticStatus()
         status.name = self.get_fully_qualified_name() + "/motion"
         status.hardware_id = self.base_frame
+        if self.external_joint_control:
+            now = self.get_clock().now().nanoseconds * 1e-9
+            current = self.feedback_stamp is not None and (
+                0 <= now - self.feedback_stamp <= self.configuration["feedback_timeout"]
+            )
+            status.level = DiagnosticStatus.OK if current else DiagnosticStatus.WARN
+            status.message = (
+                "external joint control"
+                if current
+                else "external control: stale feedback"
+            )
+            status.values = [KeyValue(key="command_owner", value="external")]
+            array = DiagnosticArray()
+            array.header.stamp = self.get_clock().now().to_msg()
+            array.status = [status]
+            self.status_pub.publish(array)
+            return
         if self.supervisor.phase is TransitionPhase.FAULT:
             status.level = DiagnosticStatus.ERROR
         elif self.supervisor.reason not in ("", "stopped"):
