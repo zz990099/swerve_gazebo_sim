@@ -5,7 +5,6 @@ from pathlib import Path
 
 import pytest
 from launch.actions import DeclareLaunchArgument, IncludeLaunchDescription
-from launch.utilities import perform_substitutions
 
 from launch import LaunchContext
 from swerve_gazebo_sim import launch_support
@@ -145,10 +144,7 @@ def test_mppi_launch_shares_model_and_exclusive_execution(monkeypatch, family):
     )
     demo = module.setup(context)[0]
     assert isinstance(demo, IncludeLaunchDescription)
-    arguments = {
-        perform_substitutions(context, name): perform_substitutions(context, value)
-        for name, value in demo.launch_arguments
-    }
+    arguments = dict(demo.launch_arguments)
     assert arguments["chassis_control"] == "true"
     assert arguments["external_joint_control"] == "false"
     assert captured[0]["namespace"] == "/robot1"
