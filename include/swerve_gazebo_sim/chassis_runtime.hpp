@@ -162,6 +162,12 @@ public:
                   sample->wheel_angular_speeds[2],
                   sample->wheel_angular_speeds[3],
                   1};
+        // Arm is an explicit zero-wheel command. A sampled Hold profile may
+        // contain tiny measured encoder residuals at t=0; they are feedback,
+        // not authorization to drive. arm() already verified stopped feedback.
+        if (new_arm)
+          for (std::size_t i = 9; i < 13; ++i)
+            p.data[i] = 0;
         targets = guard_.update(now, wall, joints, p);
         if (guard_.fault())
           stop(guard_.fault_reason());
