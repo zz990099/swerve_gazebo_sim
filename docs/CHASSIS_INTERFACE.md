@@ -88,8 +88,9 @@ sequence. A newer ordinary command can replace a queued one before acceptance.
 Cancellation/malformed callbacks cannot be hidden by later valid input between
 hardware updates.
 
-The `StampedGazeboSystem` hardware adapter delegates joint physics to the upstream
-Gazebo system and exports its synchronous read time as a state interface. The
+The Gazebo `PhysicsClock` model plugin records `UpdateInfo.simTime` directly in
+the entity-component manager. `StampedGazeboSystem` delegates joint physics to
+the upstream system and exports that model time during the same synchronous read. The
 controller uses that timestamp, rather than the asynchronous controller-manager
 ROS clock. It reads joints directly at application, computes encoder FK/local
 odometry, and calls TimedExecutor with this current snapshot. It does not restamp

@@ -150,6 +150,10 @@ def test_chassis_model_exports_synchronous_physics_clock(gazebo_version):
             },
         ).toxml()
     )
+    assert (
+        root.find(".//gazebo/plugin[@name='swerve_gazebo_sim::PhysicsClock']")
+        is not None
+    )
     hardware = root.find(".//ros2_control/hardware")
     assert hardware.find("plugin").text == "swerve_gazebo_sim/StampedGazeboSystem"
     assert hardware.find("param[@name='clock_name']").text == "bot_execution_clock"
