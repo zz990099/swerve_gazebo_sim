@@ -52,15 +52,12 @@ public:
         get_node()->get_parameter("wheel_joints").as_string_array();
     if (steering.size() != 4 || wheels.size() != 4)
       return controller_interface::CallbackReturn::ERROR;
-    const auto previous_interfaces = interfaces_;
-    const auto previous_body_frame = body_frame_;
-    const auto previous_odom_frame = odom_frame_;
-    interfaces_.clear();
+    std::vector<std::string> interfaces;
     for (const auto &name : steering)
-      interfaces_.push_back(name + "/position");
+      interfaces.push_back(name + "/position");
     for (const auto &name : wheels)
-      interfaces_.push_back(name + "/velocity");
-    auto unique = interfaces_;
+      interfaces.push_back(name + "/velocity");
+    auto unique = interfaces;
     std::sort(unique.begin(), unique.end());
     if (std::adjacent_find(unique.begin(), unique.end()) != unique.end())
       return controller_interface::CallbackReturn::ERROR;
@@ -75,22 +72,17 @@ public:
         get_node()->get_parameter("max_wheel_accel_mps2").as_double();
     config.max_steer_rate_radps =
         get_node()->get_parameter("max_steer_rate_radps").as_double();
-    body_frame_ = get_node()->get_parameter("body_frame").as_string();
-    odom_frame_ = get_node()->get_parameter("odom_frame").as_string();
-    if (body_frame_.empty() || odom_frame_.empty() ||
-        body_frame_ == odom_frame_)
+    const auto body_frame = get_node()->get_parameter("body_frame").as_string();
+    const auto odom_frame = get_node()->get_parameter("odom_frame").as_string();
+    if (body_frame.empty() || odom_frame.empty() || body_frame == odom_frame)
       return controller_interface::CallbackReturn::ERROR;
     const std::array<double, 6> model_parameters{
         config.wheelbase_m,          config.track_m,
         config.wheel_radius_m,       config.max_wheel_speed_mps,
         config.max_wheel_accel_mps2, config.max_steer_rate_radps};
-    if (runtime_ && (interfaces_ != previous_interfaces ||
-                     body_frame_ != previous_body_frame ||
-                     odom_frame_ != previous_odom_frame ||
-                     model_parameters != model_parameters_)) {
-      interfaces_ = previous_interfaces;
-      body_frame_ = previous_body_frame;
-      odom_frame_ = previous_odom_frame;
+    if (runtime_ &&
+        (interfaces != interfaces_ || body_frame != body_frame_ ||
+         odom_frame != odom_frame_ || model_parameters != model_parameters_)) {
       RCLCPP_ERROR(
           get_node()->get_logger(),
           "Restart the controller to change its model, joints or frames");
@@ -103,6 +95,9 @@ public:
       if (!runtime_) {
         runtime_ = std::make_unique<ChassisRuntime>(config);
         model_parameters_ = model_parameters;
+        interfaces_ = interfaces;
+        body_frame_ = body_frame;
+        odom_frame_ = odom_frame;
       }
     } catch (const std::exception &) {
       return controller_interface::CallbackReturn::ERROR;

@@ -51,7 +51,7 @@ class Probe(Node):
     def observe(self, state):
         self.state = state
 
-    def context(self, now):
+    def publish_context(self, now):
         msg = ChassisContext()
         msg.header.stamp = stamp(now)
         msg.header.frame_id = "odom"
@@ -82,7 +82,7 @@ class Probe(Node):
         if not self.streaming or self.state is None or self.state.fault:
             return
         now = self.get_clock().now().nanoseconds * 1e-9
-        self.context(now)
+        self.publish_context(now)
         boundary = seconds(self.state.next_execute_at)
         # Send one fresh command ahead of the observed execution boundary.
         if boundary == self.last_boundary or boundary < now:
@@ -106,7 +106,7 @@ class Probe(Node):
 
     def arm(self):
         now = self.get_clock().now().nanoseconds * 1e-9
-        self.context(now)
+        self.publish_context(now)
         self.commands.publish(self.packet(now, now, arm=True))
         self.streaming = True
         self.last_boundary = None

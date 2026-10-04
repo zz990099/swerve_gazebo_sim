@@ -110,6 +110,13 @@ jobs:
           colcon test --packages-select swerve_gazebo_sim \
             --return-code-on-test-failure --event-handlers console_direct+
           colcon test-result --verbose
+      - name: Explicit chassis velocity and mode physical test
+        working-directory: workspace
+        run: |
+          source "/opt/ros/${ROS_DISTRO}/setup.bash"
+          source install/setup.bash
+          python3 src/swerve_gazebo_sim/test/run_simulation.py \
+            --gazebo-version "${{ matrix.family }}" --chassis --logs artifacts/chassis
       - name: Single-robot physical motion and transition tests
         working-directory: workspace
         run: |
@@ -124,13 +131,6 @@ jobs:
           source install/setup.bash
           python3 src/swerve_gazebo_sim/test/run_simulation.py \
             --gazebo-version "${{ matrix.family }}" --external --logs artifacts/external
-      - name: Explicit chassis velocity and mode physical test
-        working-directory: workspace
-        run: |
-          source "/opt/ros/${ROS_DISTRO}/setup.bash"
-          source install/setup.bash
-          python3 src/swerve_gazebo_sim/test/run_simulation.py \
-            --gazebo-version "${{ matrix.family }}" --chassis --logs artifacts/chassis
       - name: Upload build, test and simulation logs
         if: always()
         uses: actions/upload-artifact@v4
