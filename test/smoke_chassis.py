@@ -53,7 +53,7 @@ class Probe(Node):
 
     def publish_context(self, now):
         msg = ChassisContext()
-        msg.header.stamp = stamp(now)
+        msg.header.stamp = stamp(min(now, seconds(self.state.header.stamp)))
         msg.header.frame_id = "odom"
         msg.path = self.path
         self.contexts.publish(msg)
@@ -79,10 +79,12 @@ class Probe(Node):
         return msg
 
     def send(self):
-        if not self.streaming or self.state is None or self.state.fault:
+        if not self.streaming or self.state is None:
             return
         now = self.get_clock().now().nanoseconds * 1e-9
         self.publish_context(now)
+        if self.state.fault or seconds(self.state.header.stamp) > now:
+            return
         boundary = seconds(self.state.next_execute_at)
         # Send one fresh command ahead of the observed execution boundary.
         if boundary == self.last_boundary or boundary < now:
@@ -105,14 +107,33 @@ class Probe(Node):
         self.wait(lambda: seconds(self.state.header.stamp) >= end, healthy=True)
 
     def arm(self):
-        now = self.get_clock().now().nanoseconds * 1e-9
-        self.publish_context(now)
-        self.commands.publish(self.packet(now, now, arm=True))
+        # Command and context use separate DDS topics. Warm the context stream
+        # while disarmed instead of assuming publication order is arrival order.
         self.streaming = True
         self.last_boundary = None
-        self.wait(
-            lambda: self.state.session_id == self.session and not self.state.fault
-        )
+        warm_until = seconds(self.state.header.stamp) + 0.1
+        self.wait(lambda: seconds(self.state.header.stamp) >= warm_until)
+        for attempt in range(5):
+            self.wait(
+                lambda: seconds(self.state.header.stamp)
+                <= self.get_clock().now().nanoseconds * 1e-9
+            )
+            now = self.get_clock().now().nanoseconds * 1e-9
+            print(
+                f"ARM attempt={attempt} session={self.session} issued={now:.6f} "
+                f"source={seconds(self.state.header.stamp):.6f}",
+                flush=True,
+            )
+            self.commands.publish(self.packet(now, now, arm=True))
+            deadline = time.monotonic() + 0.5
+            while time.monotonic() < deadline:
+                rclpy.spin_once(self, timeout_sec=0.005)
+                if self.state.session_id == self.session and not self.state.fault:
+                    print(f"ACK session={self.session}", flush=True)
+                    return
+            print(f"ARM rejected: {self.state}", flush=True)
+            self.session += 1
+        raise AssertionError(f"Unable to arm stopped chassis: {self.state}")
 
     def switch(self, mode, request_id, entry):
         self.mode = mode
@@ -126,6 +147,7 @@ class Probe(Node):
         )
         assert self.state.has_accepted_request
         assert max(map(abs, self.state.wheel_speeds)) < 0.0051
+        print(f"CONFIRMED mode={mode} request={request_id}", flush=True)
         self.request = None
         self.hold(0.2)
 
