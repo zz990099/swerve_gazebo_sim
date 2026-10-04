@@ -137,6 +137,30 @@ def test_public_model_combines_chassis_and_plugins(
     assert odometry_plugin.find("odom_topic").text == "/robot1/ground_truth/odom"
 
 
+@pytest.mark.parametrize("gazebo_version", ["ign", "gz"])
+def test_chassis_model_exports_synchronous_physics_clock(gazebo_version):
+    root = ET.fromstring(
+        xacro.process_file(
+            str(ROOT / "urdf/swerve_drive.urdf.xacro"),
+            mappings={
+                "gazebo_version": gazebo_version,
+                "config_file": str(ROOT / "config/swerve.yaml"),
+                "prefix": "bot_",
+                "chassis_control": "true",
+            },
+        ).toxml()
+    )
+    hardware = root.find(".//ros2_control/hardware")
+    assert hardware.find("plugin").text == "swerve_gazebo_sim/StampedGazeboSystem"
+    assert hardware.find("param[@name='clock_name']").text == "bot_execution_clock"
+    assert (
+        root.find(
+            ".//ros2_control/sensor[@name='bot_execution_clock']/state_interface"
+        ).get("name")
+        == "simulation_time"
+    )
+
+
 def test_gazebo_variants_reference_version_specific_files():
     ignition = gazebo_variant("ign")
     harmonic = gazebo_variant("gz")

@@ -148,6 +148,7 @@ def spawn_setup(context, variant):
     )
     xacro_mappings = {
         "gazebo_version": variant["name"],
+        "chassis_control": str(configuration["control"]["chassis_control"]).lower(),
         "config_file": config_file,
         "prefix": prefix,
         "namespace": namespace,

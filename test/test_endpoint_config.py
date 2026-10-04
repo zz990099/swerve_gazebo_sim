@@ -51,6 +51,9 @@ def test_explicit_chassis_claims_all_joints_and_maps_units():
     controller = data["/bot/chassis_controller"]["ros__parameters"]
     assert controller["body_frame"] == "bot_base_footprint"
     assert controller["odom_frame"] == "bot_odom"
+    assert (
+        controller["simulation_time_interface"] == "bot_execution_clock/simulation_time"
+    )
     assert controller["max_wheel_speed_mps"] == 2.0
     assert controller["max_wheel_accel_mps2"] == 4.0
     assert controller["steering_joints"][0] == "bot_fl_steering_joint"

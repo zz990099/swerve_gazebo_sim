@@ -88,7 +88,10 @@ sequence. A newer ordinary command can replace a queued one before acceptance.
 Cancellation/malformed callbacks cannot be hidden by later valid input between
 hardware updates.
 
-The plugin reads joint states directly at application, computes encoder FK/local
+The `StampedGazeboSystem` hardware adapter delegates joint physics to the upstream
+Gazebo system and exports its synchronous read time as a state interface. The
+controller uses that timestamp, rather than the asynchronous controller-manager
+ROS clock. It reads joints directly at application, computes encoder FK/local
 odometry, and calls TimedExecutor with this current snapshot. It does not restamp
 transported ROS observations. Only admitted profiles are sampled at 100 Hz and
 passed through EndpointGuard. Missed model boundaries, profile/context expiry,
@@ -127,7 +130,8 @@ may run alongside this controller.
 `chassis_runtime_tests` exercises actual core execution: explicit mode, zero,
 measured confirmation/receipt, mutation, timeouts, task mismatch, cancel and recovery.
 `chassis_interface_tests` loads the real plugin with loaned interfaces and typed
-messages over DDS. Existing default/external tests remain enabled.
+messages over DDS, including a delayed ROS clock with current physics time.
+Existing default/external tests remain enabled.
 
 ```bash
 python3 test/run_simulation.py --gazebo-version gz --chassis --logs artifacts/chassis

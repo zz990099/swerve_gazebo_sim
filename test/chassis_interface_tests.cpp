@@ -59,7 +59,8 @@ int main(int argc, char **argv) {
     std::vector<hardware_interface::CommandInterface> ch;
     std::vector<hardware_interface::StateInterface> sh;
     ch.reserve(8);
-    sh.reserve(8);
+    sh.reserve(9);
+    double physics_time = 0;
     pluginlib::ClassLoader<Controller> loader(
         "controller_interface", "controller_interface::ControllerInterface");
     auto controller =
@@ -90,6 +91,8 @@ int main(int argc, char **argv) {
       cl.emplace_back(ch.back());
       sl.emplace_back(sh.back());
     }
+    sh.emplace_back("execution_clock", "simulation_time", &physics_time);
+    sl.emplace_back(sh.back());
     controller->assign_interfaces(std::move(cl), std::move(sl));
     require(controller->get_node()->activate().label() == "active",
             "activate failed");
@@ -124,8 +127,9 @@ int main(int argc, char **argv) {
                 ctx->get_subscription_count() == 1,
             "DDS discovery failed");
     auto update = [&](double now) {
+      physics_time = now;
       controller->update(
-          rclcpp::Time(static_cast<int64_t>(std::llround(now * 1e9)),
+          rclcpp::Time(static_cast<int64_t>(std::llround((now - .005) * 1e9)),
                        RCL_ROS_TIME),
           rclcpp::Duration::from_seconds(.01));
     };

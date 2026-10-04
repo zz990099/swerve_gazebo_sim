@@ -81,9 +81,12 @@ class Probe(Node):
     def send(self):
         if not self.streaming or self.state is None:
             return
-        now = self.get_clock().now().nanoseconds * 1e-9
+        now = max(
+            self.get_clock().now().nanoseconds * 1e-9,
+            seconds(self.state.header.stamp),
+        )
         self.publish_context(now)
-        if self.state.fault or seconds(self.state.header.stamp) > now:
+        if self.state.fault:
             return
         boundary = seconds(self.state.next_execute_at)
         # Send one fresh command ahead of the observed execution boundary.
@@ -114,11 +117,10 @@ class Probe(Node):
         warm_until = seconds(self.state.header.stamp) + 0.1
         self.wait(lambda: seconds(self.state.header.stamp) >= warm_until)
         for attempt in range(5):
-            self.wait(
-                lambda: seconds(self.state.header.stamp)
-                <= self.get_clock().now().nanoseconds * 1e-9
+            now = max(
+                self.get_clock().now().nanoseconds * 1e-9,
+                seconds(self.state.header.stamp),
             )
-            now = self.get_clock().now().nanoseconds * 1e-9
             print(
                 f"ARM attempt={attempt} session={self.session} issued={now:.6f} "
                 f"source={seconds(self.state.header.stamp):.6f}",
