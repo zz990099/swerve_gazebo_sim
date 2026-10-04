@@ -37,10 +37,16 @@ class Probe(Node):
         self.heading_policy = 0
         self.streaming = True
         self.max_compute = 0
+        self.driving_modes = set()
         self.create_timer(0.02, self.publish_context)
 
     def observe(self, state):
         self.state = state
+        if not state.fault and (
+            math.hypot(state.velocity.x, state.velocity.y) > 0.03
+            or abs(state.velocity.z) > 0.04
+        ):
+            self.driving_modes.add(state.actual_mode)
 
     def observe_planner(self, state):
         self.planner = state
@@ -119,6 +125,7 @@ class Probe(Node):
         before = self.truth.latest.pose.pose
         x0, y0 = before.position.x, before.position.y
         yaw0 = 2 * math.atan2(before.orientation.z, before.orientation.w)
+        self.driving_modes.clear()
         self.arm()
         self.wait(
             lambda: self.planner.path_id == self.path_id and self.planner.goal_reached,
@@ -127,7 +134,10 @@ class Probe(Node):
         )
         self.hold(0.4)
         assert self.stopped(), "Planner completion must correspond to physical stopping"
-        assert self.state.actual_mode == mode
+        assert mode in self.driving_modes, (
+            f"Expected driving mode {mode}, observed {self.driving_modes}; "
+            f"terminal mode={self.state.actual_mode}"
+        )
         assert self.planner.evaluated_rollouts == 0 or self.planner.authorized
         physical = self.truth.latest.pose.pose
         physical_yaw = 2 * math.atan2(physical.orientation.z, physical.orientation.w)
@@ -143,7 +153,7 @@ class Probe(Node):
         assert position_error < 0.12, f"Physical goal position error: {position_error}"
         assert yaw_error < 0.12, f"Physical goal yaw error: {yaw_error}"
         print(
-            f"COMPLETE MPPI task={self.path_id} mode={mode} "
+            f"COMPLETE MPPI task={self.path_id} driving_mode={mode} terminal_mode={self.state.actual_mode} "
             f"physical_position_error={position_error:.4f} yaw_error={yaw_error:.4f}",
             flush=True,
         )

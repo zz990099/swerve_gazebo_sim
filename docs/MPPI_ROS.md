@@ -108,6 +108,11 @@ then verifies context loss and explicit stopped recovery. Existing interface,
 motion and external endpoint regressions remain enabled in both ROS/Gazebo CI
 variants.
 
+Physical mode assertions require observing the expected mode while moving.
+Terminal settling may legitimately switch from Crab or DualAckermann to Spin
+to correct residual yaw; completion still requires physical stopping and the
+unchanged independent position/yaw limits.
+
 The extended probe runs reverse/forward, a 21-point radius-2 m arc through four
 static cylindrical collision bodies, and translation with GoalOnly final yaw.
 The generated SDF and context share one obstacle fixture. It checks independent
