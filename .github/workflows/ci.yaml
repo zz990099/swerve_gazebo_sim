@@ -100,7 +100,7 @@ jobs:
           executables = subprocess.check_output(
               ["ros2", "pkg", "executables", "swerve_gazebo_sim"], text=True
           )
-          assert not executables.strip(), executables
+          assert executables.strip() == "swerve_gazebo_sim mppi_planner", executables
           PY
       - name: Run unit, model and launch tests
         working-directory: workspace
@@ -110,6 +110,13 @@ jobs:
           colcon test --packages-select swerve_gazebo_sim \
             --return-code-on-test-failure --event-handlers console_direct+
           colcon test-result --verbose
+      - name: MPPI closed-loop path and explicit mode physical test
+        working-directory: workspace
+        run: |
+          source "/opt/ros/${ROS_DISTRO}/setup.bash"
+          source install/setup.bash
+          python3 src/swerve_gazebo_sim/test/run_simulation.py \
+            --gazebo-version "${{ matrix.family }}" --mppi --logs artifacts/mppi
       - name: Explicit chassis velocity and mode physical test
         working-directory: workspace
         run: |
@@ -141,4 +148,3 @@ jobs:
             workspace/build/swerve_gazebo_sim/test_results/
             workspace/artifacts/
           if-no-files-found: warn
-
