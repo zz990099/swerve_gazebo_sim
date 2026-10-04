@@ -63,6 +63,7 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--multi", action="store_true")
     parser.add_argument("--external", action="store_true")
+    parser.add_argument("--chassis", action="store_true")
     parser.add_argument(
         "--gazebo-version",
         choices=("ign", "gz"),
@@ -70,6 +71,8 @@ def main():
     )
     parser.add_argument("--logs", default=None)
     args = parser.parse_args()
+    if args.chassis and (args.multi or args.external):
+        parser.error("--chassis requires one exclusive chassis endpoint")
     if args.multi and args.external:
         parser.error("--external currently validates one protected endpoint")
     directory = Path(args.logs or tempfile.mkdtemp(prefix="swerve_validation_"))
@@ -101,6 +104,8 @@ def main():
             "headless:=true",
             "publish_ground_truth:=true",
         ]
+        if args.chassis:
+            command += ["chassis_control:=true"]
         if args.external:
             command += ["external_joint_control:=true"]
         if args.multi:
@@ -110,7 +115,9 @@ def main():
             sys.executable,
             str(
                 Path(__file__).with_name(
-                    "smoke_endpoint.py" if args.external else "smoke_motion.py"
+                    "smoke_chassis.py"
+                    if args.chassis
+                    else "smoke_endpoint.py" if args.external else "smoke_motion.py"
                 )
             ),
             "--gazebo-version",

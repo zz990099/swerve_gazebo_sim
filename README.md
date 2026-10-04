@@ -1,3 +1,12 @@
+## Explicit velocity and mode control (0.3)
+
+Optional `chassis_control:=true` receives typed body velocity and explicit mode
+requests, with measured confirmation and persistent mode on zero velocity.
+Build with `SWERVE_BUILD_CHASSIS_CONTROLLER=ON` and installed MPPI core 0.20.
+See [CHASSIS_INTERFACE.md](docs/CHASSIS_INTERFACE.md) for build, topics, timing,
+startup and recovery. Existing Twist and external-joint modes remain available
+as mutually exclusive alternatives.
+
 # swerve_gazebo_sim
 
 A standalone four-wheel steering / four-wheel drive chassis simulation. A simple
