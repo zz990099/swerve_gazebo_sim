@@ -14,6 +14,7 @@ float64 remaining_path
 float64 cross_track_error
 float64 goal_distance
 float64 goal_yaw_error
+# Duration of the last actual planning call; idle feedback does not overwrite it.
 float64 compute_seconds
 uint64 evaluated_rollouts
 bool budget_exhausted

@@ -101,8 +101,9 @@ public:
             return;
           const double start = wall();
           auto packet = bridge_->plan(feedback_, context);
-          compute_s_ = wall() - start;
+          const double elapsed = wall() - start;
           if (packet) {
+            compute_s_ = elapsed;
             auto &e = packet->envelope;
             planned_path_id_ = e.source_task->path_id;
             e.issued_at_s = std::max(e.source_stamp_s, now().seconds());
