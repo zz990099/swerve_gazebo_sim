@@ -106,7 +106,8 @@ not a claim of allocation-free hard-real-time hardware control.
 
 1. Wait for fresh state and independently verify physical stopping. Initial mode
    requires canonical measured steering (normally zero-steering Ackermann/Crab).
-2. Publish fresh context and one authorized zero command with arm=true, no request,
+2. Start refreshing context before sending the arm command; separate DDS topics
+   do not guarantee arrival order. Publish one authorized zero command with arm=true, no request,
    and strictly newer nonzero session (< 2^53). Use current source/issuance times,
    execution no later than receipt and a short unexpired validity window.
 3. Await matching healthy state and stream at advertised boundaries. Do not repeat

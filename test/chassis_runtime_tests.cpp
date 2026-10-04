@@ -49,6 +49,11 @@ struct Fixture {
 };
 int main() {
   try {
+    Fixture epsilon;
+    epsilon.joints.wheels.fill(1e-6);
+    epsilon.tick(epsilon.command(core::DriveMode::DualAckermann), true);
+    require(!epsilon.runtime.fault(),
+            "stationary encoder roundoff must not reject zero-wheel arm");
     Fixture f;
     f.tick(f.command(core::DriveMode::Crab), true);
     for (int i = 0; i < 5; ++i)
