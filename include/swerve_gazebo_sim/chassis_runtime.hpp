@@ -204,8 +204,8 @@ private:
     if (c.mode != core::DriveMode::DualAckermann &&
         c.mode != core::DriveMode::Crab && c.mode != core::DriveMode::Spin)
       return false;
-    // Recovery declares a stationary canonical geometry, never infers mode from
-    // a velocity. Noncanonical steering must first be recovered deliberately.
+    // Startup requires canonical geometry. Later recovery keeps the last mode
+    // and stopped measured steering; only an explicit request may change mode.
     const auto canonical = core::DriveModel(config_).steering_for_mode(
         c.mode, state_.steering_angles);
     if (session_ != 0 && c.mode != state_.actual_mode)

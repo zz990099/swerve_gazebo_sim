@@ -174,6 +174,15 @@ int main(int argc, char **argv) {
       require(commands[i] == 0, "cancel did not zero wheels");
     controller->get_node()->deactivate();
     controller->release_interfaces();
+    require(controller->get_node()->cleanup().label() == "unconfigured",
+            "cleanup failed");
+    require(controller->configure().label() == "inactive",
+            "unchanged reconfiguration failed");
+    require(controller->get_node()->cleanup().label() == "unconfigured",
+            "second cleanup failed");
+    controller->get_node()->set_parameter(rclcpp::Parameter("track_m", .7));
+    require(controller->configure().label() != "inactive",
+            "reconfiguration silently changed the execution model");
     std::cout << "Typed ROS command/context/state, plugin ownership, Crab "
                  "drive and cancellation passed\n";
   } catch (const std::exception &e) {
