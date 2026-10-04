@@ -57,7 +57,10 @@ class SwerveController(Node):
             self.configuration["wheel_radius"],
             self.configuration["steering_limit"],
         )
-        self.external_joint_control = self.configuration["external_joint_control"]
+        self.external_joint_control = (
+            self.configuration["external_joint_control"]
+            or self.configuration["chassis_control"]
+        )
         self.supervisor = (
             None
             if self.external_joint_control

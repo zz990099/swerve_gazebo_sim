@@ -21,6 +21,7 @@ GEOMETRY = (
 )
 CONTROL = (
     "external_joint_control",
+    "chassis_control",
     "update_rate",
     "cmd_timeout",
     "feedback_timeout",
@@ -65,7 +66,7 @@ ODOMETRY_DEFAULTS = {
     "odom_frame": "",
     "odom_child_frame": "",
 }
-COMMAND_DEFAULTS = {"external_joint_control": False}
+COMMAND_DEFAULTS = {"external_joint_control": False, "chassis_control": False}
 
 GAZEBO_VARIANTS = {
     "ign": {
@@ -114,7 +115,12 @@ def load_config(path):
         if not isinstance(cfg[section], dict) or set(cfg[section]) != set(keys):
             raise ValueError(f'{section} must contain exactly: {", ".join(keys)}')
         for key, value in cfg[section].items():
-            if key in ("publish_odom", "publish_odom_tf", "external_joint_control"):
+            if key in (
+                "publish_odom",
+                "publish_odom_tf",
+                "external_joint_control",
+                "chassis_control",
+            ):
                 if not isinstance(value, bool):
                     raise ValueError(f"{key} must be boolean")
             elif key in ("odom_topic", "odom_frame", "odom_child_frame"):
@@ -178,7 +184,7 @@ def controller_config(template, cfg, namespace, prefix):
             f"{prefix}{corner}_{joint_type}_joint"
             for corner in ("fl", "fr", "rl", "rr")
         ]
-    if cfg["control"]["external_joint_control"]:
+    if cfg["control"]["external_joint_control"] or cfg["control"]["chassis_control"]:
         manager = data["controller_manager"]["ros__parameters"]
         del manager["steering_controller"], manager["wheel_controller"]
         manager["guarded_joint_controller"] = {
@@ -196,14 +202,48 @@ def controller_config(template, cfg, namespace, prefix):
             stopped_wheel_radps=cfg["control"]["stopped_wheel_speed"],
         )
         data["guarded_joint_controller"] = {"ros__parameters": guarded}
+    if cfg["control"]["chassis_control"]:
+        manager = data["controller_manager"]["ros__parameters"]
+        del manager["guarded_joint_controller"]
+        manager["chassis_controller"] = {"type": "swerve_gazebo_sim/ChassisController"}
+        low = data.pop("guarded_joint_controller")["ros__parameters"]
+        g, c = cfg["geometry"], cfg["control"]
+        data["chassis_controller"] = {
+            "ros__parameters": {
+                "use_sim_time": True,
+                "steering_joints": low["steering_joints"],
+                "wheel_joints": low["wheel_joints"],
+                "body_frame": prefix + "base_footprint",
+                "odom_frame": c["odom_frame"] or prefix + "odom",
+                "wheelbase_m": g["wheelbase"],
+                "track_m": g["track_width"],
+                "wheel_radius_m": g["wheel_radius"],
+                "max_wheel_speed_mps": c["max_wheel_speed"] * g["wheel_radius"],
+                "max_wheel_accel_mps2": c["max_wheel_acceleration"] * g["wheel_radius"],
+                "max_steer_rate_radps": c["max_steering_rate"],
+            }
+        }
     return {f"{namespace}/{key}": value for key, value in data.items()}
 
 
 def validate_control(configuration):
     """Validate controller startup parameters, including hysteresis ordering."""
+    if configuration["chassis_control"] and configuration["external_joint_control"]:
+        raise ValueError(
+            "chassis_control and external_joint_control are mutually exclusive"
+        )
+    if configuration["chassis_control"] and configuration["update_rate"] != 100.0:
+        raise ValueError(
+            "chassis_control currently requires a 100 Hz controller manager"
+        )
     for key in CONTROL:
         value = configuration[key]
-        if key in ("publish_odom", "publish_odom_tf", "external_joint_control"):
+        if key in (
+            "publish_odom",
+            "publish_odom_tf",
+            "external_joint_control",
+            "chassis_control",
+        ):
             if not isinstance(value, bool):
                 raise ValueError(f"{key} must be boolean")
             continue
