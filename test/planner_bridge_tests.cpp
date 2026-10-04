@@ -88,6 +88,29 @@ void closed_loop(core::Pose2d goal, core::DriveMode expected) {
 }
 int main() {
   try {
+    // ROS issuance can be newer than transported physics feedback. Wait for a
+    // source strictly newer than the arm issuance, avoiding command replay.
+    PlannerBridge protocol;
+    PlannerFeedback f;
+    f.vehicle.stamp_s = 1;
+    ChassisContext c;
+    c.valid = true;
+    c.stamp_s = 1;
+    c.input.reference_path = {{0, 0, 0}, {.6, 0, 0}};
+    auto arm = protocol.arm(f, c, 5, 1.01);
+    require(arm && arm->envelope.source_stamp_s == 1 &&
+                arm->envelope.issued_at_s == 1.01 &&
+                arm->envelope.execute_at_s == 1.01,
+            "arm preserves source independently from issuance");
+    f.session = 5;
+    f.fault = false;
+    f.vehicle.stamp_s = 1.01;
+    f.next_execute_at = 1.11;
+    c.stamp_s = 1.01;
+    require(!protocol.plan(f, c), "arm acknowledgement cannot replay issuance");
+    protocol.stop();
+    require(!protocol.arm(f, c, 5), "recovery must increase session");
+    require(!protocol.arm(f, c, 6, 1.2), "excessively old source cannot arm");
     closed_loop({.6, 0, 0}, core::DriveMode::DualAckermann);
     closed_loop({0, .6, 0}, core::DriveMode::Crab);
     closed_loop({0, 0, .7}, core::DriveMode::Spin);

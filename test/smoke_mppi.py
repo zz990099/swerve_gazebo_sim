@@ -164,15 +164,37 @@ def main():
         node.task(0.7, 0, 0, 0)
         node.task(0, 0.5, 0, 2)
         node.task(0, 0, 0.6, 1)
+        # Begin another translation, then revoke context while actually moving.
+        assert node.service(node.stop_client).success
+        node.wait(lambda: node.state.fault and node.stopped())
+        p = node.state.pose
+        node.path_id += 1
+        node.path = [
+            Pose2D(x=p.x, y=p.y, theta=p.theta),
+            Pose2D(x=p.x + 1.0, y=p.y, theta=p.theta),
+        ]
+        node.arm()
+        node.wait(
+            lambda: math.hypot(
+                node.truth.latest.twist.twist.linear.x,
+                node.truth.latest.twist.twist.linear.y,
+            )
+            > 0.06,
+            healthy=True,
+        )
         # Loss of the independent context stream cannot renew obstacle/task age.
         node.streaming = False
         node.wait(lambda: node.state.fault and node.planner.phase == 3)
         node.wait(node.stopped)
         old_session = node.state.session_id
+        retained_mode = node.state.actual_mode
+        p = node.state.pose
+        node.path_id += 1
+        node.path = [Pose2D(x=p.x, y=p.y, theta=p.theta)] * 2
         node.arm()
         node.hold(0.4)
         assert node.state.session_id > old_session
-        assert node.state.actual_mode == 1
+        assert node.state.actual_mode == retained_mode
         assert node.max_compute < 0.075
         print(
             f"PASS: MPPI straight/Crab/Spin goals, physical settling, context loss and explicit recovery; max_compute={node.max_compute:.4f}s"

@@ -24,21 +24,27 @@ public:
   void stop() { phase_ = PlannerPhase::Fault; }
   std::optional<ChassisPacket> arm(const PlannerFeedback &f,
                                    const ChassisContext &c,
-                                   std::uint64_t new_session) {
+                                   std::uint64_t new_session,
+                                   double issued_at = -1) {
+    if (issued_at == -1)
+      issued_at = f.vehicle.stamp_s;
     if (phase_ == PlannerPhase::Running || phase_ == PlannerPhase::Arming ||
         new_session <= std::max(session_, f.session) ||
         new_session >= (std::uint64_t{1} << 53) || !valid(f, c) ||
-        !core::is_stopped(f.vehicle, config_))
+        !core::is_stopped(f.vehicle, config_) || !std::isfinite(issued_at) ||
+        issued_at < f.vehicle.stamp_s || issued_at - f.vehicle.stamp_s > .1)
       return std::nullopt;
     controller_.reset(); // Keeps planner request-ID high water marks.
     session_ = new_session;
     sequence_ = 0;
     last_boundary_ = -1;
-    last_source_ = f.vehicle.stamp_s;
+    last_source_ = issued_at;
     output_ = {};
     output_.command = core::ChassisCommand{f.vehicle.actual_mode, {}, {}};
     phase_ = PlannerPhase::Arming;
-    return packet(f, c, output_, f.vehicle.stamp_s, true);
+    auto p = packet(f, c, output_, issued_at, true);
+    p.envelope.issued_at_s = issued_at;
+    return p;
   }
   std::optional<ChassisPacket> plan(const PlannerFeedback &f,
                                     const ChassisContext &c) {

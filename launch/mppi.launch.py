@@ -32,18 +32,20 @@ def setup(context):
         PythonLaunchDescriptionSource(
             os.path.join(package, "launch", f"demo_{family}.launch.py")
         ),
-        launch_arguments={
-            key: LaunchConfiguration(key).perform(context)
-            for key in (
-                "config",
-                "namespace",
-                "robot_name",
-                "prefix",
-                "headless",
-                "publish_ground_truth",
-            )
-        }
-        | {"chassis_control": "true", "external_joint_control": "false"},
+        launch_arguments=(
+            {
+                key: LaunchConfiguration(key).perform(context)
+                for key in (
+                    "config",
+                    "namespace",
+                    "robot_name",
+                    "prefix",
+                    "headless",
+                    "publish_ground_truth",
+                )
+            }
+            | {"chassis_control": "true", "external_joint_control": "false"}
+        ).items(),
     )
     planner = Node(
         package="swerve_gazebo_sim",

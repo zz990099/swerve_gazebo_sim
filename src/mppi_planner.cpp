@@ -109,16 +109,14 @@ public:
           const auto session =
               std::max(static_cast<std::uint64_t>(epoch_us),
                        std::max(bridge_->session(), feedback_.session) + 1);
-          auto packet = bridge_->arm(feedback_, context_, session);
+          const double issued =
+              std::max(feedback_.vehicle.stamp_s, now().seconds());
+          auto packet = bridge_->arm(feedback_, context_, session, issued);
           if (!packet) {
             response->message = "Arm refused: stop first, verify physical "
                                 "stopping and resolve input faults";
             return;
           }
-          auto &e = packet->envelope;
-          e.issued_at_s = std::max(e.source_stamp_s, now().seconds());
-          e.execute_at_s = e.issued_at_s;
-          e.valid_until_s = e.execute_at_s + .025;
           commands_->publish(encode(*packet, body_));
           arm_wall_ = wall();
           response->success = true;
