@@ -36,7 +36,9 @@
   <exec_depend>joint_state_broadcaster</exec_depend>
   <depend>gz_ros2_control</depend>
   <build_depend condition="$ROS_DISTRO == humble">ignition-gazebo6</build_depend>
+  <build_depend condition="$ROS_DISTRO == humble">ignition-plugin</build_depend>
   <build_depend condition="$ROS_DISTRO == jazzy">gz_sim_vendor</build_depend>
+  <build_depend condition="$ROS_DISTRO == jazzy">gz_plugin_vendor</build_depend>
   <depend>hardware_interface</depend>
   <depend>rclcpp</depend>
   <depend>rclcpp_lifecycle</depend>

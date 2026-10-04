@@ -72,6 +72,12 @@
       <xacro:control_module name="rr" />
     </ros2_control>
 
+    <xacro:if value="${chassis_control}">
+      <gazebo>
+        <plugin filename="stamped_gazebo_system" name="swerve_gazebo_sim::PhysicsClock" />
+      </gazebo>
+    </xacro:if>
+
     <gazebo>
       <plugin
         filename="gz_ros2_control-system"

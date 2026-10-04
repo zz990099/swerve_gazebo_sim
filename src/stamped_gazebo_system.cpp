@@ -2,6 +2,12 @@
 #include "gz_ros2_control/gz_system_interface.hpp"
 #include "pluginlib/class_list_macros.hpp"
 #include "pluginlib/class_loader.hpp"
+#include "swerve_gazebo_sim/physics_time.hpp"
+#ifdef SWERVE_GAZEBO_HUMBLE
+#include <ignition/gazebo/components/ParentEntity.hh>
+#else
+#include <gz/sim/components/ParentEntity.hh>
+#endif
 #include <limits>
 
 namespace swerve_gazebo_sim {
@@ -40,6 +46,14 @@ public:
                unsigned int rate
 #endif
                ) override {
+    if (joints.empty())
+      return false;
+    const auto parent =
+        ecm.Component<sim::components::ParentEntity>(joints.begin()->second);
+    if (!parent)
+      return false;
+    model_ = parent->Data();
+    ecm_ = &ecm;
     return joints_->initSim(node, joints, info, ecm, rate);
   }
   std::vector<hardware_interface::StateInterface>
@@ -55,8 +69,9 @@ public:
   hardware_interface::return_type
   read(const rclcpp::Time &time, const rclcpp::Duration &period) override {
     const auto result = joints_->read(time, period);
-    simulation_time_ = result == hardware_interface::return_type::OK
-                           ? time.seconds()
+    const auto clock = ecm_ ? ecm_->Component<PhysicsTime>(model_) : nullptr;
+    simulation_time_ = result == hardware_interface::return_type::OK && clock
+                           ? clock->Data()
                            : std::numeric_limits<double>::quiet_NaN();
     return result;
   }
@@ -90,6 +105,8 @@ private:
   pluginlib::ClassLoader<gz_ros2_control::GazeboSimSystemInterface> loader_;
   std::shared_ptr<gz_ros2_control::GazeboSimSystemInterface> joints_;
   std::string clock_name_;
+  sim::EntityComponentManager *ecm_ = nullptr;
+  sim::Entity model_ = sim::kNullEntity;
   double simulation_time_ = std::numeric_limits<double>::quiet_NaN();
 };
 } // namespace swerve_gazebo_sim
