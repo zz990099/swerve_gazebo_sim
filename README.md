@@ -1,3 +1,10 @@
+## MPPI ROS planning and explicit control (0.4)
+
+The optional `mppi_planner` node connects the standalone MPPI core to the explicit
+chassis execution interface. It consumes independently refreshed task/obstacle
+context and measured chassis state, plans ahead of each execution boundary and
+requires explicit stopped arming/recovery. See [MPPI_ROS.md](docs/MPPI_ROS.md).
+
 ## Explicit velocity and mode control (0.3)
 
 Optional `chassis_control:=true` receives typed body velocity and explicit mode

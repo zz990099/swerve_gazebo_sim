@@ -64,6 +64,7 @@ def main():
     parser.add_argument("--multi", action="store_true")
     parser.add_argument("--external", action="store_true")
     parser.add_argument("--chassis", action="store_true")
+    parser.add_argument("--mppi", action="store_true")
     parser.add_argument(
         "--gazebo-version",
         choices=("ign", "gz"),
@@ -71,6 +72,8 @@ def main():
     )
     parser.add_argument("--logs", default=None)
     args = parser.parse_args()
+    if args.mppi and (args.multi or args.external or args.chassis):
+        parser.error("--mppi requires one exclusive MPPI planning owner")
     if args.chassis and (args.multi or args.external):
         parser.error("--chassis requires one exclusive chassis endpoint")
     if args.multi and args.external:
@@ -100,10 +103,12 @@ def main():
             "ros2",
             "launch",
             "swerve_gazebo_sim",
-            f"demo_{args.gazebo_version}.launch.py",
+            "mppi.launch.py" if args.mppi else f"demo_{args.gazebo_version}.launch.py",
             "headless:=true",
             "publish_ground_truth:=true",
         ]
+        if args.mppi:
+            command += [f"gazebo_version:={args.gazebo_version}"]
         if args.chassis:
             command += ["chassis_control:=true"]
         if args.external:
@@ -115,9 +120,13 @@ def main():
             sys.executable,
             str(
                 Path(__file__).with_name(
-                    "smoke_chassis.py"
-                    if args.chassis
-                    else "smoke_endpoint.py" if args.external else "smoke_motion.py"
+                    "smoke_mppi.py"
+                    if args.mppi
+                    else (
+                        "smoke_chassis.py"
+                        if args.chassis
+                        else "smoke_endpoint.py" if args.external else "smoke_motion.py"
+                    )
                 )
             ),
             "--gazebo-version",

@@ -4,7 +4,7 @@ import importlib.util
 from pathlib import Path
 
 import pytest
-from launch.actions import DeclareLaunchArgument
+from launch.actions import DeclareLaunchArgument, IncludeLaunchDescription
 
 from launch import LaunchContext
 from swerve_gazebo_sim import launch_support
@@ -119,3 +119,40 @@ def test_external_control_override_requires_boolean():
         launch_support.external_control_parameters(
             context, {"external_joint_control": False}
         )
+
+
+@pytest.mark.parametrize("family", ["ign", "gz"])
+def test_mppi_launch_shares_model_and_exclusive_execution(monkeypatch, family):
+    path = ROOT / "launch/mppi.launch.py"
+    spec = importlib.util.spec_from_file_location("mppi_launch", path)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    monkeypatch.setattr(
+        module, "get_package_share_directory", lambda package: str(ROOT)
+    )
+    captured = []
+    monkeypatch.setattr(module, "Node", lambda **kwargs: captured.append(kwargs))
+    context = LaunchContext()
+    context.launch_configurations.update(
+        gazebo_version=family,
+        config=str(ROOT / "config/swerve.yaml"),
+        namespace="robot1",
+        robot_name="robot1",
+        prefix="auto",
+        headless="true",
+        publish_ground_truth="true",
+    )
+    demo = module.setup(context)[0]
+    assert isinstance(demo, IncludeLaunchDescription)
+    arguments = dict(demo.launch_arguments)
+    assert arguments["chassis_control"] == "true"
+    assert arguments["external_joint_control"] == "false"
+    assert captured[0]["namespace"] == "/robot1"
+    assert captured[0]["executable"] == "mppi_planner"
+    model = captured[0]["parameters"][0]
+    assert model["body_frame"] == "robot1_base_footprint"
+    assert model["odom_frame"] == "robot1_odom"
+    assert model["max_wheel_speed_mps"] == 2.0
+    assert model["max_wheel_accel_mps2"] == 4.0
+    assert model["use_sim_time"] is True
+    assert model["confirmation_timeout_s"] == 5.0

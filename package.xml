@@ -1,7 +1,7 @@
 <?xml version="1.0"?>
 <package format="3">
   <name>swerve_gazebo_sim</name>
-  <version>0.3.0</version>
+  <version>0.4.0</version>
   <description>Independent four-module swerve chassis simulation for ROS 2 and Gazebo.</description>
   <maintainer email="188520056629@163.com">Binfeng Zhang</maintainer>
   <license>Apache-2.0</license>
@@ -22,6 +22,7 @@
   <exec_depend>nav_msgs</exec_depend>
   <exec_depend>sensor_msgs</exec_depend>
   <depend>std_msgs</depend>
+  <depend>std_srvs</depend>
   <depend>controller_interface</depend>
   <depend>pluginlib</depend>
   <depend>realtime_tools</depend>

@@ -30,6 +30,7 @@ public:
       auto_declare<double>("max_wheel_speed_mps", 2.0);
       auto_declare<double>("max_wheel_accel_mps2", 4.0);
       auto_declare<double>("max_steer_rate_radps", 2.5);
+      auto_declare<double>("confirmation_timeout_s", 2.0);
     } catch (const std::exception &e) {
       RCLCPP_ERROR(get_node()->get_logger(), "%s", e.what());
       return controller_interface::CallbackReturn::ERROR;
@@ -74,6 +75,8 @@ public:
         get_node()->get_parameter("max_wheel_accel_mps2").as_double();
     config.max_steer_rate_radps =
         get_node()->get_parameter("max_steer_rate_radps").as_double();
+    config.confirmation_timeout_s =
+        get_node()->get_parameter("confirmation_timeout_s").as_double();
     const auto clock_interface =
         get_node()->get_parameter("simulation_time_interface").as_string();
     if (clock_interface.empty())
@@ -82,10 +85,11 @@ public:
     const auto odom_frame = get_node()->get_parameter("odom_frame").as_string();
     if (body_frame.empty() || odom_frame.empty() || body_frame == odom_frame)
       return controller_interface::CallbackReturn::ERROR;
-    const std::array<double, 6> model_parameters{
-        config.wheelbase_m,          config.track_m,
-        config.wheel_radius_m,       config.max_wheel_speed_mps,
-        config.max_wheel_accel_mps2, config.max_steer_rate_radps};
+    const std::array<double, 7> model_parameters{
+        config.wheelbase_m,           config.track_m,
+        config.wheel_radius_m,        config.max_wheel_speed_mps,
+        config.max_wheel_accel_mps2,  config.max_steer_rate_radps,
+        config.confirmation_timeout_s};
     if (runtime_ &&
         (interfaces != interfaces_ || body_frame != body_frame_ ||
          odom_frame != odom_frame_ || clock_interface != clock_interface_ ||
@@ -261,7 +265,7 @@ private:
   bool write(const EndpointTargets &targets) {
     return write_joint_targets(command_interfaces_, command_index_, targets);
   }
-  std::array<double, 6> model_parameters_{};
+  std::array<double, 7> model_parameters_{};
   std::vector<std::string> interfaces_, state_names_;
   std::string clock_interface_;
   std::size_t clock_index_ = 0;
