@@ -2,8 +2,8 @@
 #include "controller_interface/controller_interface.hpp"
 #include "pluginlib/class_list_macros.hpp"
 #include "realtime_tools/realtime_buffer.h"
-#include "swerve_gazebo_sim/chassis_conversion.hpp"
 #include "realtime_tools/realtime_publisher.h"
+#include "swerve_gazebo_sim/chassis_conversion.hpp"
 #include "swerve_gazebo_sim/command_write.hpp"
 #include <atomic>
 #include <chrono>
@@ -34,17 +34,27 @@ public:
     }
     return controller_interface::CallbackReturn::SUCCESS;
   }
-  controller_interface::InterfaceConfiguration command_interface_configuration() const override {
-    return {controller_interface::interface_configuration_type::INDIVIDUAL, interfaces_};
+  controller_interface::InterfaceConfiguration
+  command_interface_configuration() const override {
+    return {controller_interface::interface_configuration_type::INDIVIDUAL,
+            interfaces_};
   }
-  controller_interface::InterfaceConfiguration state_interface_configuration() const override {
-    return {controller_interface::interface_configuration_type::INDIVIDUAL, interfaces_};
+  controller_interface::InterfaceConfiguration
+  state_interface_configuration() const override {
+    return {controller_interface::interface_configuration_type::INDIVIDUAL,
+            interfaces_};
   }
-  controller_interface::CallbackReturn on_configure(const rclcpp_lifecycle::State &) override {
-    const auto steering = get_node()->get_parameter("steering_joints").as_string_array();
-    const auto wheels = get_node()->get_parameter("wheel_joints").as_string_array();
+  controller_interface::CallbackReturn
+  on_configure(const rclcpp_lifecycle::State &) override {
+    const auto steering =
+        get_node()->get_parameter("steering_joints").as_string_array();
+    const auto wheels =
+        get_node()->get_parameter("wheel_joints").as_string_array();
     if (steering.size() != 4 || wheels.size() != 4)
       return controller_interface::CallbackReturn::ERROR;
+    const auto previous_interfaces = interfaces_;
+    const auto previous_body_frame = body_frame_;
+    const auto previous_odom_frame = odom_frame_;
     interfaces_.clear();
     for (const auto &name : steering)
       interfaces_.push_back(name + "/position");
@@ -57,18 +67,43 @@ public:
     core::Config config;
     config.wheelbase_m = get_node()->get_parameter("wheelbase_m").as_double();
     config.track_m = get_node()->get_parameter("track_m").as_double();
-    config.wheel_radius_m = get_node()->get_parameter("wheel_radius_m").as_double();
-    config.max_wheel_speed_mps = get_node()->get_parameter("max_wheel_speed_mps").as_double();
-    config.max_wheel_accel_mps2 = get_node()->get_parameter("max_wheel_accel_mps2").as_double();
-    config.max_steer_rate_radps = get_node()->get_parameter("max_steer_rate_radps").as_double();
+    config.wheel_radius_m =
+        get_node()->get_parameter("wheel_radius_m").as_double();
+    config.max_wheel_speed_mps =
+        get_node()->get_parameter("max_wheel_speed_mps").as_double();
+    config.max_wheel_accel_mps2 =
+        get_node()->get_parameter("max_wheel_accel_mps2").as_double();
+    config.max_steer_rate_radps =
+        get_node()->get_parameter("max_steer_rate_radps").as_double();
     body_frame_ = get_node()->get_parameter("body_frame").as_string();
     odom_frame_ = get_node()->get_parameter("odom_frame").as_string();
-    if (body_frame_.empty() || odom_frame_.empty() || body_frame_ == odom_frame_)
+    if (body_frame_.empty() || odom_frame_.empty() ||
+        body_frame_ == odom_frame_)
       return controller_interface::CallbackReturn::ERROR;
+    const std::array<double, 6> model_parameters{
+        config.wheelbase_m,          config.track_m,
+        config.wheel_radius_m,       config.max_wheel_speed_mps,
+        config.max_wheel_accel_mps2, config.max_steer_rate_radps};
+    if (runtime_ && (interfaces_ != previous_interfaces ||
+                     body_frame_ != previous_body_frame ||
+                     odom_frame_ != previous_odom_frame ||
+                     model_parameters != model_parameters_)) {
+      interfaces_ = previous_interfaces;
+      body_frame_ = previous_body_frame;
+      odom_frame_ = previous_odom_frame;
+      RCLCPP_ERROR(
+          get_node()->get_logger(),
+          "Restart the controller to change its model, joints or frames");
+      return controller_interface::CallbackReturn::ERROR;
+    }
     try {
       // Fixed configuration after first configure; session history must survive
-      // deactivate/cleanup/reconfigure. Restart the process to change the model.
-      if (!runtime_) runtime_ = std::make_unique<ChassisRuntime>(config);
+      // deactivate/cleanup/reconfigure. Restart the process to change the
+      // model.
+      if (!runtime_) {
+        runtime_ = std::make_unique<ChassisRuntime>(config);
+        model_parameters_ = model_parameters;
+      }
     } catch (const std::exception &) {
       return controller_interface::CallbackReturn::ERROR;
     }
@@ -80,23 +115,33 @@ public:
           packet.receipt = ++receipt_;
           // A later valid packet cannot hide a cancellation or malformed packet
           // between two hardware updates.
-          if (packet.malformed || !message->authorized) poison_ = true;
-          buffer_.writeFromNonRT(std::make_shared<const ChassisPacket>(std::move(packet)));
+          if (packet.malformed || !message->authorized)
+            poison_ = true;
+          buffer_.writeFromNonRT(
+              std::make_shared<const ChassisPacket>(std::move(packet)));
         });
-    context_subscription_ = get_node()->create_subscription<msg::ChassisContext>(
-        "~/context", rclcpp::QoS(1).reliable().durability_volatile(),
-        [this](const msg::ChassisContext::SharedPtr message) {
-          auto context = decode(*message, odom_frame_);
-          if (!context.valid) poison_ = true;
-          context_.writeFromNonRT(std::make_shared<const ChassisContext>(std::move(context)));
-        });
-    status_publisher_ = get_node()->create_publisher<msg::ChassisState>("~/state", rclcpp::QoS(1));
-    realtime_status_ = std::make_unique<realtime_tools::RealtimePublisher<msg::ChassisState>>(status_publisher_);
+    context_subscription_ =
+        get_node()->create_subscription<msg::ChassisContext>(
+            "~/context", rclcpp::QoS(1).reliable().durability_volatile(),
+            [this](const msg::ChassisContext::SharedPtr message) {
+              auto context = decode(*message, odom_frame_);
+              if (!context.valid)
+                poison_ = true;
+              context_.writeFromNonRT(
+                  std::make_shared<const ChassisContext>(std::move(context)));
+            });
+    status_publisher_ = get_node()->create_publisher<msg::ChassisState>(
+        "~/state", rclcpp::QoS(1));
+    realtime_status_ =
+        std::make_unique<realtime_tools::RealtimePublisher<msg::ChassisState>>(
+            status_publisher_);
     publish_status_snapshot();
     return controller_interface::CallbackReturn::SUCCESS;
   }
-  controller_interface::CallbackReturn on_activate(const rclcpp_lifecycle::State &) override {
-    if (!runtime_ || command_interfaces_.size() != 8 || state_interfaces_.size() != 8)
+  controller_interface::CallbackReturn
+  on_activate(const rclcpp_lifecycle::State &) override {
+    if (!runtime_ || command_interfaces_.size() != 8 ||
+        state_interfaces_.size() != 8)
       return controller_interface::CallbackReturn::ERROR;
     for (std::size_t i = 0; i < 8; ++i) {
       bool command_found = false, state_found = false;
@@ -118,7 +163,8 @@ public:
     // required.
     activation_receipt_ = receipt_.load();
     const double sim = get_node()->now().seconds();
-    const bool written = write(runtime_->update(sim, wall_now(), measured(), {}));
+    const bool written =
+        write(runtime_->update(sim, wall_now(), measured(), {}));
     if (!written)
       runtime_->stop(EndpointFault::WriteFailure);
     publish_status_snapshot();
@@ -126,10 +172,12 @@ public:
       return controller_interface::CallbackReturn::ERROR;
     return controller_interface::CallbackReturn::SUCCESS;
   }
-  controller_interface::CallbackReturn on_deactivate(const rclcpp_lifecycle::State &) override {
+  controller_interface::CallbackReturn
+  on_deactivate(const rclcpp_lifecycle::State &) override {
     runtime_->stop();
     const double sim = get_node()->now().seconds();
-    const bool written = write(runtime_->update(sim, wall_now(), measured(), {}));
+    const bool written =
+        write(runtime_->update(sim, wall_now(), measured(), {}));
     if (!written)
       runtime_->stop(EndpointFault::WriteFailure);
     publish_status_snapshot();
@@ -146,10 +194,12 @@ public:
       activation_receipt_ = receipt_.load();
     }
     try {
-      const auto targets = runtime_->update(time.seconds(), wall_now(), measured(),
-          context ? *context : ChassisContext{},
-          packet && packet->receipt > activation_receipt_ ? std::optional<ChassisPacket>(*packet)
-                                                         : std::nullopt);
+      const auto targets =
+          runtime_->update(time.seconds(), wall_now(), measured(),
+                           context ? *context : ChassisContext{},
+                           packet && packet->receipt > activation_receipt_
+                               ? std::optional<ChassisPacket>(*packet)
+                               : std::nullopt);
       if (!write(targets)) {
         runtime_->stop(EndpointFault::WriteFailure);
         write(runtime_->update(time.seconds(), wall_now(), measured(), {}));
@@ -158,7 +208,10 @@ public:
       runtime_->stop(EndpointFault::CommandRejected);
       EndpointTargets stopped = measured();
       stopped.wheels.fill(0);
-      for (double &a : stopped.steering) a = std::isfinite(a) ? std::clamp(a, -1.5707963267948966, 1.5707963267948966) : 0;
+      for (double &a : stopped.steering)
+        a = std::isfinite(a)
+                ? std::clamp(a, -1.5707963267948966, 1.5707963267948966)
+                : 0;
       write(stopped);
       (void)e;
     }
@@ -174,7 +227,8 @@ private:
     }
   }
   static double wall_now() {
-    return std::chrono::duration<double>(std::chrono::steady_clock::now().time_since_epoch())
+    return std::chrono::duration<double>(
+               std::chrono::steady_clock::now().time_since_epoch())
         .count();
   }
   EndpointTargets measured() const {
@@ -188,20 +242,22 @@ private:
   bool write(const EndpointTargets &targets) {
     return write_joint_targets(command_interfaces_, command_index_, targets);
   }
+  std::array<double, 6> model_parameters_{};
   std::vector<std::string> interfaces_;
   std::array<std::size_t, 8> command_index_{}, state_index_{};
   std::unique_ptr<ChassisRuntime> runtime_;
   std::string body_frame_, odom_frame_;
   realtime_tools::RealtimeBuffer<std::shared_ptr<const ChassisPacket>> buffer_;
-  realtime_tools::RealtimeBuffer<std::shared_ptr<const ChassisContext>> context_;
+  realtime_tools::RealtimeBuffer<std::shared_ptr<const ChassisContext>>
+      context_;
   rclcpp::Subscription<msg::ChassisCommand>::SharedPtr subscription_;
   rclcpp::Subscription<msg::ChassisContext>::SharedPtr context_subscription_;
   rclcpp::Publisher<msg::ChassisState>::SharedPtr status_publisher_;
-  std::unique_ptr<realtime_tools::RealtimePublisher<msg::ChassisState>> realtime_status_;
+  std::unique_ptr<realtime_tools::RealtimePublisher<msg::ChassisState>>
+      realtime_status_;
   std::atomic<std::uint64_t> receipt_{0};
   std::atomic<bool> poison_{false};
   std::uint64_t activation_receipt_ = 0;
-
 };
 } // namespace swerve_gazebo_sim
 PLUGINLIB_EXPORT_CLASS(swerve_gazebo_sim::ChassisController,
