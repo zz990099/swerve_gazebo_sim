@@ -63,6 +63,7 @@ def setup(context):
                 "max_wheel_speed_mps": c["max_wheel_speed"] * g["wheel_radius"],
                 "max_wheel_accel_mps2": c["max_wheel_acceleration"] * g["wheel_radius"],
                 "max_steer_rate_radps": c["max_steering_rate"],
+                "confirmation_timeout_s": c["mode_switch_timeout"],
             }
         ],
     )

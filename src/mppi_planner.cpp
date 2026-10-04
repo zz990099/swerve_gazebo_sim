@@ -3,7 +3,9 @@
 #include "std_srvs/srv/trigger.hpp"
 #include "swerve_gazebo_sim/msg/planner_state.hpp"
 #include "swerve_gazebo_sim/planner_conversion.hpp"
+#include <atomic>
 #include <chrono>
+#include <mutex>
 
 namespace swerve_gazebo_sim {
 class MppiPlanner : public rclcpp::Node {
@@ -30,11 +32,17 @@ public:
         number("max_wheel_accel_mps2", config.max_wheel_accel_mps2);
     config.max_steer_rate_radps =
         number("max_steer_rate_radps", config.max_steer_rate_radps);
+    config.confirmation_timeout_s =
+        number("confirmation_timeout_s", config.confirmation_timeout_s);
     // Never disable the wall compute budget in a live ROS planning node.
     config.compute_budget_ratio = number("compute_budget_ratio", .6);
     if (!(config.compute_budget_ratio > 0 && config.compute_budget_ratio <= .7))
       throw std::invalid_argument("compute_budget_ratio must be in (0, 0.7]");
     bridge_ = std::make_unique<PlannerBridge>(config);
+    planning_group_ =
+        create_callback_group(rclcpp::CallbackGroupType::MutuallyExclusive);
+    rclcpp::SubscriptionOptions planning_options;
+    planning_options.callback_group = planning_group_;
     auto qos = rclcpp::QoS(1).reliable().durability_volatile();
     commands_ = create_publisher<msg::ChassisCommand>(
         "chassis_controller/command", qos);
@@ -43,14 +51,19 @@ public:
     status_ = create_publisher<msg::PlannerState>("~/state", qos);
     context_sub_ = create_subscription<msg::ChassisContext>(
         "~/context", qos, [this](msg::ChassisContext::SharedPtr m) {
-          context_ = decode(*m, odom_);
-          context_wall_ = wall();
-          if (!context_.valid) {
-            cancel();
+          auto context = decode(*m, odom_);
+          {
+            std::lock_guard<std::mutex> lock(input_mutex_);
+            context_ = context;
+            context_wall_ = wall();
+            if (warm_since_ < 0 && context.valid)
+              warm_since_ = context.stamp_s;
+          }
+          if (!context.valid) {
+            input_poison_ = true;
+            publish_cancel();
             return;
           }
-          if (warm_since_ < 0)
-            warm_since_ = context_.stamp_s;
           contexts_->publish(*m); // Preserve the independent source timestamp.
         });
     feedback_sub_ = create_subscription<msg::ChassisState>(
@@ -58,6 +71,10 @@ public:
         [this](msg::ChassisState::SharedPtr m) {
           feedback_ = decode(*m);
           state_wall_ = wall();
+          if (input_poison_.exchange(false)) {
+            cancel();
+            return;
+          }
           if (m->header.frame_id != odom_ || m->body_frame != body_ ||
               m->actual_mode > 2 ||
               (m->has_accepted_request && m->accepted_mode > 2)) {
@@ -67,23 +84,43 @@ public:
           if (bridge_->phase() != PlannerPhase::Running &&
               bridge_->phase() != PlannerPhase::Arming)
             return;
-          if (wall() - context_wall_ >= .15) {
+          ChassisContext context;
+          double context_wall;
+          {
+            std::lock_guard<std::mutex> lock(input_mutex_);
+            context = context_;
+            context_wall = context_wall_;
+          }
+          if (wall() - context_wall >= .15) {
             cancel();
             return;
           }
           // Independent topics can deliver context ahead of a queued state.
           // Wait for current feedback instead of retiming either observation.
-          if (context_.stamp_s > feedback_.vehicle.stamp_s + 1e-9)
+          if (context.stamp_s > feedback_.vehicle.stamp_s + 1e-9)
             return;
           const double start = wall();
-          auto packet = bridge_->plan(feedback_, context_);
+          auto packet = bridge_->plan(feedback_, context);
           compute_s_ = wall() - start;
           if (packet) {
             auto &e = packet->envelope;
             planned_path_id_ = e.source_task->path_id;
             e.issued_at_s = std::max(e.source_stamp_s, now().seconds());
-            if (compute_s_ >= .075 || e.issued_at_s > e.execute_at_s ||
-                wall() - context_wall_ >= .15) {
+            bool changed;
+            {
+              std::lock_guard<std::mutex> lock(input_mutex_);
+              changed =
+                  !context_.valid || !e.source_task->matches(context_.input);
+              context_wall = context_wall_;
+            }
+            if (input_poison_.exchange(false) || changed ||
+                compute_s_ >= .075 || e.issued_at_s > e.execute_at_s ||
+                wall() - context_wall >= .15) {
+              RCLCPP_WARN(get_logger(),
+                          "Plan cancelled: source=%.3f issued=%.3f "
+                          "execution=%.3f compute=%.4f",
+                          e.source_stamp_s, e.issued_at_s, e.execute_at_s,
+                          compute_s_);
               cancel();
             } else {
               commands_->publish(encode(*packet, body_));
@@ -92,12 +129,27 @@ public:
             cancel();
           }
           publish_status();
-        });
+        },
+        planning_options);
     arm_ = create_service<std_srvs::srv::Trigger>(
-        "~/arm", [this](const std_srvs::srv::Trigger::Request::SharedPtr,
-                        std_srvs::srv::Trigger::Response::SharedPtr response) {
-          if (wall() - state_wall_ >= .15 || wall() - context_wall_ >= .15 ||
-              warm_since_ < 0 || context_.stamp_s - warm_since_ < .1) {
+        "~/arm",
+        [this](const std_srvs::srv::Trigger::Request::SharedPtr,
+               std_srvs::srv::Trigger::Response::SharedPtr response) {
+          ChassisContext context;
+          double context_wall, warm_since;
+          {
+            std::lock_guard<std::mutex> lock(input_mutex_);
+            context = context_;
+            context_wall = context_wall_;
+            warm_since = warm_since_;
+          }
+          if (input_poison_.exchange(false)) {
+            cancel();
+            response->message = "Invalid input requires fresh stopped recovery";
+            return;
+          }
+          if (wall() - state_wall_ >= .15 || wall() - context_wall >= .15 ||
+              warm_since < 0 || context.stamp_s - warm_since < .1) {
             response->message =
                 "Fresh state and at least 0.1 s of context streaming required";
             return;
@@ -111,7 +163,7 @@ public:
                        std::max(bridge_->session(), feedback_.session) + 1);
           const double issued =
               std::max(feedback_.vehicle.stamp_s, now().seconds());
-          auto packet = bridge_->arm(feedback_, context_, session, issued);
+          auto packet = bridge_->arm(feedback_, context, session, issued);
           if (!packet) {
             response->message = "Arm refused: stop first, verify physical "
                                 "stopping and resolve input faults";
@@ -123,23 +175,37 @@ public:
           response->message =
               "Stopped arm sent; await Running in planner state";
           publish_status();
-        });
+        },
+        rmw_qos_profile_services_default, planning_group_);
     stop_ = create_service<std_srvs::srv::Trigger>(
-        "~/stop", [this](const std_srvs::srv::Trigger::Request::SharedPtr,
-                         std_srvs::srv::Trigger::Response::SharedPtr response) {
+        "~/stop",
+        [this](const std_srvs::srv::Trigger::Request::SharedPtr,
+               std_srvs::srv::Trigger::Response::SharedPtr response) {
           cancel();
           response->success = true;
           response->message =
               "Cancellation sent; a new explicit stopped arm is required";
-        });
-    watchdog_ = create_wall_timer(std::chrono::milliseconds(20), [this] {
-      const auto phase = bridge_->phase();
-      if ((phase == PlannerPhase::Running || phase == PlannerPhase::Arming) &&
-          (wall() - state_wall_ >= .15 || wall() - context_wall_ >= .15 ||
-           (phase == PlannerPhase::Arming && wall() - arm_wall_ >= .15)))
-        cancel();
-      publish_status();
-    });
+        },
+        rmw_qos_profile_services_default, planning_group_);
+    watchdog_ = create_wall_timer(
+        std::chrono::milliseconds(20),
+        [this] {
+          const auto phase = bridge_->phase();
+          double context_wall;
+          {
+            std::lock_guard<std::mutex> lock(input_mutex_);
+            context_wall = context_wall_;
+          }
+          if (input_poison_.exchange(false))
+            cancel();
+          if ((phase == PlannerPhase::Running ||
+               phase == PlannerPhase::Arming) &&
+              (wall() - state_wall_ >= .15 || wall() - context_wall >= .15 ||
+               (phase == PlannerPhase::Arming && wall() - arm_wall_ >= .15)))
+            cancel();
+          publish_status();
+        },
+        planning_group_);
   }
 
 private:
@@ -150,13 +216,18 @@ private:
   }
   void cancel() {
     bridge_->stop();
-    warm_since_ = -1;
+    {
+      std::lock_guard<std::mutex> lock(input_mutex_);
+      warm_since_ = -1;
+    }
+    publish_cancel();
+    publish_status();
+  }
+  void publish_cancel() {
     msg::ChassisCommand m;
     m.header.frame_id = body_;
-    m.header.stamp = stamp(std::max(0.0, feedback_.vehicle.stamp_s));
     // No authorization is itself a cancellation, independent of task/timing.
     commands_->publish(m);
-    publish_status();
   }
   void publish_status() {
     msg::PlannerState m;
@@ -187,6 +258,9 @@ private:
   std::unique_ptr<PlannerBridge> bridge_;
   PlannerFeedback feedback_;
   ChassisContext context_;
+  std::mutex input_mutex_;
+  std::atomic<bool> input_poison_{false};
+  rclcpp::CallbackGroup::SharedPtr planning_group_;
   std::uint64_t planned_path_id_ = 0;
   double state_wall_ = -1, context_wall_ = -1, arm_wall_ = -1, warm_since_ = -1,
          compute_s_ = 0;
@@ -202,7 +276,11 @@ private:
 int main(int argc, char **argv) {
   rclcpp::init(argc, argv);
   try {
-    rclcpp::spin(std::make_shared<swerve_gazebo_sim::MppiPlanner>());
+    auto node = std::make_shared<swerve_gazebo_sim::MppiPlanner>();
+    rclcpp::executors::MultiThreadedExecutor executor(rclcpp::ExecutorOptions(),
+                                                      2);
+    executor.add_node(node);
+    executor.spin();
   } catch (const std::exception &e) {
     RCLCPP_ERROR(rclcpp::get_logger("mppi_planner"), "%s", e.what());
     rclcpp::shutdown();

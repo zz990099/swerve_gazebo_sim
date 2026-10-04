@@ -155,3 +155,4 @@ def test_mppi_launch_shares_model_and_exclusive_execution(monkeypatch, family):
     assert model["max_wheel_speed_mps"] == 2.0
     assert model["max_wheel_accel_mps2"] == 4.0
     assert model["use_sim_time"] is True
+    assert model["confirmation_timeout_s"] == 5.0

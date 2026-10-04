@@ -12,12 +12,20 @@ ros2 launch swerve_gazebo_sim mppi.launch.py gazebo_version:=gz
 ```
 
 Launch shares geometry, joint limits, frames and namespace with the execution
-controller. Other execution model and planning parameters remain core 0.20
-defaults. Only the whole-compute wall budget differs: the planner defaults to
+controller. The shared `mode_switch_timeout` supplies the confirmation deadline
+(5 s in the bundled simulation); other model and planning parameters remain core
+0.20 defaults. The planner defaults to
 60 ms per 100 ms model interval. `compute_budget_ratio` is startup-only, in
 (0, 0.7]; a late or absent planning result cancels execution. It cannot be disabled
 for live control. These defaults leave a transport margin, not a certified latency
 bound. Missed physical deadlines still stop at the independent endpoint.
+
+Planning and protocol callbacks use a separate mutually exclusive callback group
+from context and ROS clock reception, with two executor threads. Context forwarding
+continues while MPPI computes. Input snapshots are locked only during copies;
+malformed context immediately cancels and poisons any concurrent result. Task
+identity is checked again before publication. The execution endpoint remains the
+independent owner of stopping and physical deadlines.
 
 ## Input, output and ownership
 

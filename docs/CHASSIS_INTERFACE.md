@@ -30,7 +30,7 @@ ros2 launch swerve_gazebo_sim demo_gz.launch.py chassis_control:=true
 
 `chassis_control` and `external_joint_control` are mutually exclusive. Manager
 rate is 100 Hz; model intervals are 0.1 simulation seconds. Geometry and
-wheel/steering limits come from `swerve.yaml`; other execution parameters are
+wheel/steering limits and `mode_switch_timeout` come from `swerve.yaml`; other execution parameters are
 core 0.20 defaults. The planning owner must use the same configuration.
 Configuration is startup-only; restart the process to change it. Generated
 messages and existing Python modules share the installed package namespace.
