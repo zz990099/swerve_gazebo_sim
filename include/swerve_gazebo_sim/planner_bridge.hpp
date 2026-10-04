@@ -26,19 +26,21 @@ public:
       history_.pop_front();
   }
   std::optional<ChassisContext> at(double source_stamp,
-                                 const ChassisContext &latest) const {
+                                   const ChassisContext &latest) const {
     if (!latest.valid)
       return std::nullopt;
     std::optional<ChassisContext> best;
     const auto task = core::CommandTask::capture(latest.input);
     for (const auto &context : history_) {
       if (context.stamp_s <= source_stamp + 1e-9 &&
-          source_stamp - context.stamp_s <= .15 && task.matches(context.input) &&
+          source_stamp - context.stamp_s <= .15 &&
+          task.matches(context.input) &&
           (!best || context.stamp_s >= best->stamp_s))
         best = context;
     }
     return best;
   }
+
 private:
   std::deque<ChassisContext> history_;
 };

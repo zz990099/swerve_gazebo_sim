@@ -90,7 +90,7 @@ jobs:
         run: |
           source "/opt/ros/${ROS_DISTRO}/setup.bash"
           colcon build --packages-select swerve_gazebo_sim \
-            --event-handlers console_direct+ --cmake-args -DBUILD_TESTING=ON \
+            --event-handlers console_direct+ --cmake-args -DBUILD_TESTING=ON -DCMAKE_BUILD_TYPE=Release \
             -DSWERVE_BUILD_CHASSIS_CONTROLLER=ON -DCMAKE_PREFIX_PATH=/opt/swerve-core
           source install/setup.bash
           python3 - <<'PY'

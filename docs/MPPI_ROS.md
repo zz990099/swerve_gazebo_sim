@@ -33,6 +33,15 @@ within 150 ms and matching the latest full task. It never retimestamps perceptio
 or revives a replaced task; invalid input clears the history. The execution owner
 still checks the newest context at physical application.
 
+The chassis-only stamped Gazebo hardware fixes the upstream position servo gain
+to 1.0. The upstream default 0.1 creates roughly ten controller ticks of steering
+lag while wheel velocity follows promptly, violating the affine joint model in
+curves. Both supported versions use `gain * update_rate * position_error` as the
+steering velocity. With 200 Hz physics / 100 Hz control the bundled gain leaves
+about one controller tick of lag. Physical regression must validate this plant;
+the core's rolling-vector consistency tolerance remains 0.02 m/s. This simulator
+servo setting is not a hardware calibration.
+
 ## Input, output and ownership
 
 All names below are relative to the robot namespace, reliable/volatile depth one.

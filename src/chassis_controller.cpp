@@ -207,6 +207,7 @@ public:
   }
   controller_interface::return_type update(const rclcpp::Time &,
                                            const rclcpp::Duration &) override {
+    const bool was_fault = runtime_->fault();
     const auto packet = *buffer_.readFromRT();
     const auto context = *context_.readFromRT();
     if (poison_.exchange(false)) {
@@ -234,6 +235,30 @@ public:
                 : 0;
       write(stopped);
       (void)e;
+    }
+    if (!was_fault && runtime_->fault()) {
+      const auto &s = runtime_->state();
+      RCLCPP_WARN(get_node()->get_logger(),
+                  "Chassis latched: endpoint=%u detail=%u timing=%u safety=%u "
+                  "physics=%.3f next=%.3f source=%.3f issued=%.3f execute=%.3f "
+                  "target=(%.4f,%.4f,%.4f) measured=(%.4f,%.4f,%.4f)",
+                  unsigned(runtime_->reason()), runtime_->rejection_detail(),
+                  unsigned(runtime_->timing_error()),
+                  unsigned(runtime_->safety_error()), s.stamp_s,
+                  runtime_->next_tick(),
+                  packet ? packet->envelope.source_stamp_s : -1,
+                  packet ? packet->envelope.issued_at_s : -1,
+                  packet ? packet->envelope.execute_at_s : -1,
+                  packet && packet->envelope.command.command
+                      ? packet->envelope.command.command->target_velocity.vx
+                      : 0,
+                  packet && packet->envelope.command.command
+                      ? packet->envelope.command.command->target_velocity.vy
+                      : 0,
+                  packet && packet->envelope.command.command
+                      ? packet->envelope.command.command->target_velocity.wz
+                      : 0,
+                  s.velocity.vx, s.velocity.vy, s.velocity.wz);
     }
     publish_status_snapshot();
     return controller_interface::return_type::OK;

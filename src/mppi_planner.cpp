@@ -89,7 +89,8 @@ public:
           double context_wall;
           {
             std::lock_guard<std::mutex> lock(input_mutex_);
-            auto compatible = context_history_.at(feedback_.vehicle.stamp_s, context_);
+            auto compatible =
+                context_history_.at(feedback_.vehicle.stamp_s, context_);
             if (!compatible)
               return;
             context = *compatible;

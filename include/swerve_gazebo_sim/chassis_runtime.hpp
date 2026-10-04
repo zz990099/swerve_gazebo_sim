@@ -42,6 +42,7 @@ public:
   double next_tick() const { return next_tick_s_; }
   core::TimingError timing_error() const { return timing_error_; }
   core::ExecutionSafetyError safety_error() const { return safety_error_; }
+  unsigned rejection_detail() const { return rejection_detail_; }
   EndpointTargets
   update(double now, double wall, const EndpointTargets &joints,
          const ChassisContext &context,
@@ -93,6 +94,7 @@ public:
       if (!clock || !valid || p.malformed || !std::isfinite(p.wall_s) ||
           p.wall_s > wall || wall - p.wall_s >= .15 ||
           !p.envelope.command.command) {
+        rejection_detail_ = 1;
         stop(EndpointFault::CommandRejected);
       } else if (p.arm) {
         if (fault_ && arm(p, now, wall, context)) {
@@ -108,6 +110,7 @@ public:
             !std::isfinite(e.execute_at_s) ||
             e.execute_at_s > next_tick_s_ + 1e-9 || e.valid_until_s < now ||
             e.issued_at_s > now + 1e-9) {
+          rejection_detail_ = 2;
           stop(EndpointFault::CommandRejected);
         } else {
           pending_ = p;
@@ -116,8 +119,10 @@ public:
     }
     if (!fault_ &&
         (!context.valid || context.stamp_s > now + 1e-9 ||
-         !std::isfinite(context.stamp_s) || now - context.stamp_s > .15))
+         !std::isfinite(context.stamp_s) || now - context.stamp_s > .15)) {
+      rejection_detail_ = 3;
       stop(EndpointFault::CommandRejected);
+    }
     if (!fault_ && (new_arm || now + 1e-9 >= next_tick_s_)) {
       if (!pending_ || now > next_tick_s_ + 1e-9 ||
           wall - pending_->wall_s >= .15) {
@@ -134,6 +139,7 @@ public:
         safety_error_ = result.safety_error;
         pending_.reset();
         if (!runner_.install(result, now, wall)) {
+          rejection_detail_ = 4;
           stop(EndpointFault::CommandRejected);
         } else {
           next_tick_s_ = now + config_.dt_s;
@@ -180,6 +186,7 @@ public:
   }
 
 private:
+  unsigned rejection_detail_ = 0;
   static EndpointLimits limits(const core::Config &c) {
     EndpointLimits l;
     l.max_wheel_speed_radps = c.max_wheel_speed_mps / c.wheel_radius_m;
@@ -240,6 +247,7 @@ private:
     feedback_stamp_ = now;
     session_ = e.session_id;
     sequence_ = 0;
+    rejection_detail_ = 0;
     next_tick_s_ = now;
     fault_ = false;
     (void)wall;
