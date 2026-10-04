@@ -215,6 +215,7 @@ def controller_config(template, cfg, namespace, prefix):
                 "wheel_joints": low["wheel_joints"],
                 "body_frame": prefix + "base_footprint",
                 "odom_frame": c["odom_frame"] or prefix + "odom",
+                "simulation_time_interface": prefix + "execution_clock/simulation_time",
                 "wheelbase_m": g["wheelbase"],
                 "track_m": g["track_width"],
                 "wheel_radius_m": g["wheel_radius"],

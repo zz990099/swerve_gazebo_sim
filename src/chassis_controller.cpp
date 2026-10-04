@@ -22,6 +22,8 @@ public:
       auto_declare<std::vector<std::string>>("wheel_joints", {});
       auto_declare<std::string>("body_frame", "base_footprint");
       auto_declare<std::string>("odom_frame", "odom");
+      auto_declare<std::string>("simulation_time_interface",
+                                "execution_clock/simulation_time");
       auto_declare<double>("wheelbase_m", .6);
       auto_declare<double>("track_m", .5);
       auto_declare<double>("wheel_radius_m", .1);
@@ -42,7 +44,7 @@ public:
   controller_interface::InterfaceConfiguration
   state_interface_configuration() const override {
     return {controller_interface::interface_configuration_type::INDIVIDUAL,
-            interfaces_};
+            state_names_};
   }
   controller_interface::CallbackReturn
   on_configure(const rclcpp_lifecycle::State &) override {
@@ -72,6 +74,10 @@ public:
         get_node()->get_parameter("max_wheel_accel_mps2").as_double();
     config.max_steer_rate_radps =
         get_node()->get_parameter("max_steer_rate_radps").as_double();
+    const auto clock_interface =
+        get_node()->get_parameter("simulation_time_interface").as_string();
+    if (clock_interface.empty())
+      return controller_interface::CallbackReturn::ERROR;
     const auto body_frame = get_node()->get_parameter("body_frame").as_string();
     const auto odom_frame = get_node()->get_parameter("odom_frame").as_string();
     if (body_frame.empty() || odom_frame.empty() || body_frame == odom_frame)
@@ -82,7 +88,8 @@ public:
         config.max_wheel_accel_mps2, config.max_steer_rate_radps};
     if (runtime_ &&
         (interfaces != interfaces_ || body_frame != body_frame_ ||
-         odom_frame != odom_frame_ || model_parameters != model_parameters_)) {
+         odom_frame != odom_frame_ || clock_interface != clock_interface_ ||
+         model_parameters != model_parameters_)) {
       RCLCPP_ERROR(
           get_node()->get_logger(),
           "Restart the controller to change its model, joints or frames");
@@ -98,6 +105,9 @@ public:
         interfaces_ = interfaces;
         body_frame_ = body_frame;
         odom_frame_ = odom_frame;
+        clock_interface_ = clock_interface;
+        state_names_ = interfaces_;
+        state_names_.push_back(clock_interface_);
       }
     } catch (const std::exception &) {
       return controller_interface::CallbackReturn::ERROR;
@@ -136,7 +146,7 @@ public:
   controller_interface::CallbackReturn
   on_activate(const rclcpp_lifecycle::State &) override {
     if (!runtime_ || command_interfaces_.size() != 8 ||
-        state_interfaces_.size() != 8)
+        state_interfaces_.size() != 9)
       return controller_interface::CallbackReturn::ERROR;
     for (std::size_t i = 0; i < 8; ++i) {
       bool command_found = false, state_found = false;
@@ -145,6 +155,8 @@ public:
           command_index_[i] = j;
           command_found = true;
         }
+      }
+      for (std::size_t j = 0; j < 9; ++j) {
         if (state_interfaces_[j].get_name() == interfaces_[i]) {
           state_index_[i] = j;
           state_found = true;
@@ -153,11 +165,20 @@ public:
       if (!command_found || !state_found)
         return controller_interface::CallbackReturn::ERROR;
     }
+    bool clock_found = false;
+    for (std::size_t j = 0; j < 9; ++j) {
+      if (state_interfaces_[j].get_name() == clock_interface_) {
+        clock_index_ = j;
+        clock_found = true;
+      }
+    }
+    if (!clock_found)
+      return controller_interface::CallbackReturn::ERROR;
     runtime_->stop();
     // Discard commands received while inactive. An explicit new arm is
     // required.
     activation_receipt_ = receipt_.load();
-    const double sim = get_node()->now().seconds();
+    const double sim = simulation_time();
     const bool written =
         write(runtime_->update(sim, wall_now(), measured(), {}));
     if (!written)
@@ -170,7 +191,7 @@ public:
   controller_interface::CallbackReturn
   on_deactivate(const rclcpp_lifecycle::State &) override {
     runtime_->stop();
-    const double sim = get_node()->now().seconds();
+    const double sim = simulation_time();
     const bool written =
         write(runtime_->update(sim, wall_now(), measured(), {}));
     if (!written)
@@ -180,7 +201,7 @@ public:
       return controller_interface::CallbackReturn::ERROR;
     return controller_interface::CallbackReturn::SUCCESS;
   }
-  controller_interface::return_type update(const rclcpp::Time &time,
+  controller_interface::return_type update(const rclcpp::Time &,
                                            const rclcpp::Duration &) override {
     const auto packet = *buffer_.readFromRT();
     const auto context = *context_.readFromRT();
@@ -190,14 +211,14 @@ public:
     }
     try {
       const auto targets =
-          runtime_->update(time.seconds(), wall_now(), measured(),
+          runtime_->update(simulation_time(), wall_now(), measured(),
                            context ? *context : ChassisContext{},
                            packet && packet->receipt > activation_receipt_
                                ? std::optional<ChassisPacket>(*packet)
                                : std::nullopt);
       if (!write(targets)) {
         runtime_->stop(EndpointFault::WriteFailure);
-        write(runtime_->update(time.seconds(), wall_now(), measured(), {}));
+        write(runtime_->update(simulation_time(), wall_now(), measured(), {}));
       }
     } catch (const std::exception &e) {
       runtime_->stop(EndpointFault::CommandRejected);
@@ -226,6 +247,9 @@ private:
                std::chrono::steady_clock::now().time_since_epoch())
         .count();
   }
+  double simulation_time() const {
+    return state_interfaces_[clock_index_].get_value();
+  }
   EndpointTargets measured() const {
     EndpointTargets state;
     for (std::size_t i = 0; i < 4; ++i) {
@@ -238,7 +262,9 @@ private:
     return write_joint_targets(command_interfaces_, command_index_, targets);
   }
   std::array<double, 6> model_parameters_{};
-  std::vector<std::string> interfaces_;
+  std::vector<std::string> interfaces_, state_names_;
+  std::string clock_interface_;
+  std::size_t clock_index_ = 0;
   std::array<std::size_t, 8> command_index_{}, state_index_{};
   std::unique_ptr<ChassisRuntime> runtime_;
   std::string body_frame_, odom_frame_;
