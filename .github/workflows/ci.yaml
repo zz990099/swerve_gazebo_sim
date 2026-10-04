@@ -61,6 +61,11 @@ jobs:
       - uses: actions/checkout@v4
         with:
           path: workspace/src/swerve_gazebo_sim
+      - uses: actions/checkout@v4
+        with:
+          repository: zz990099/swerve_mppi
+          ref: faa77abcfc54fc93a877905879f054045dee4530
+          path: mppi-core
       - name: Install ROS and Gazebo dependencies
         run: |
           apt-get update
@@ -74,14 +79,23 @@ jobs:
           rosdep update --rosdistro "$ROS_DISTRO"
           rosdep install --from-paths workspace/src --ignore-src -r -y \
             --rosdistro "$ROS_DISTRO"
+      - name: Build pinned standalone execution core
+        run: |
+          cmake -S mppi-core -B mppi-build -DCMAKE_BUILD_TYPE=Release \
+            -DSWERVE_MPPI_BUILD_TESTS=OFF -DCMAKE_INSTALL_PREFIX=/opt/swerve-core
+          cmake --build mppi-build --parallel 2
+          cmake --install mppi-build
       - name: Build isolated package
         working-directory: workspace
         run: |
           source "/opt/ros/${ROS_DISTRO}/setup.bash"
           colcon build --packages-select swerve_gazebo_sim \
-            --event-handlers console_direct+ --cmake-args -DBUILD_TESTING=ON
+            --event-handlers console_direct+ --cmake-args -DBUILD_TESTING=ON \
+            -DSWERVE_BUILD_CHASSIS_CONTROLLER=ON -DCMAKE_PREFIX_PATH=/opt/swerve-core
           source install/setup.bash
           python3 - <<'PY'
+          from swerve_gazebo_sim.msg import ChassisCommand, ChassisState
+          from swerve_gazebo_sim.controller import SwerveController
           import subprocess
           executables = subprocess.check_output(
               ["ros2", "pkg", "executables", "swerve_gazebo_sim"], text=True
@@ -110,6 +124,13 @@ jobs:
           source install/setup.bash
           python3 src/swerve_gazebo_sim/test/run_simulation.py \
             --gazebo-version "${{ matrix.family }}" --external --logs artifacts/external
+      - name: Explicit chassis velocity and mode physical test
+        working-directory: workspace
+        run: |
+          source "/opt/ros/${ROS_DISTRO}/setup.bash"
+          source install/setup.bash
+          python3 src/swerve_gazebo_sim/test/run_simulation.py \
+            --gazebo-version "${{ matrix.family }}" --chassis --logs artifacts/chassis
       - name: Upload build, test and simulation logs
         if: always()
         uses: actions/upload-artifact@v4

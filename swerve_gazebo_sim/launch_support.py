@@ -48,6 +48,23 @@ def external_control_parameters(context, configuration):
     return {"external_joint_control": value.lower() == "true"}
 
 
+def chassis_control_launch_argument():
+    return DeclareLaunchArgument(
+        "chassis_control",
+        default_value="",
+        description="Explicit body velocity/mode controller; requires chassis-enabled build",
+    )
+
+
+def chassis_control_parameters(context, configuration):
+    value = LaunchConfiguration("chassis_control").perform(context)
+    if not value:
+        return {"chassis_control": configuration["chassis_control"]}
+    if value.lower() not in ("true", "false"):
+        raise ValueError("chassis_control must be true or false")
+    return {"chassis_control": value.lower() == "true"}
+
+
 def odometry_launch_arguments():
     descriptions = {
         "publish_odom": "Publish kinematic Odometry; empty uses YAML",
@@ -92,6 +109,16 @@ def spawn_setup(context, variant):
     configuration["control"].update(
         external_control_parameters(context, configuration["control"])
     )
+
+    configuration["control"].update(
+        chassis_control_parameters(context, configuration["control"])
+    )
+    configuration["control"].update(
+        odometry_parameters(context, configuration["control"])
+    )
+    from .bringup import validate_control
+
+    validate_control(configuration["control"])
 
     controller_template = os.path.join(
         package_share,
@@ -191,9 +218,13 @@ def spawn_setup(context, variant):
         arguments=[
             "joint_state_broadcaster",
             *(
-                ["guarded_joint_controller"]
-                if configuration["control"]["external_joint_control"]
-                else ["steering_controller", "wheel_controller"]
+                ["chassis_controller"]
+                if configuration["control"]["chassis_control"]
+                else (
+                    ["guarded_joint_controller"]
+                    if configuration["control"]["external_joint_control"]
+                    else ["steering_controller", "wheel_controller"]
+                )
             ),
             "--controller-manager",
             f"{namespace}/controller_manager",
@@ -358,6 +389,7 @@ def generate_spawn_launch_description(variant):
     for argument in odometry_launch_arguments():
         launch_description.add_action(argument)
     launch_description.add_action(external_control_launch_argument())
+    launch_description.add_action(chassis_control_launch_argument())
     launch_description.add_action(declare_namespace)
     launch_description.add_action(declare_prefix)
     launch_description.add_action(declare_robot_name)
@@ -414,6 +446,7 @@ def demo_setup(context, variant):
                 key: LaunchConfiguration(key).perform(context)
                 for key in (*ODOMETRY_DEFAULTS, "publish_odom_tf")
             },
+            "chassis_control": LaunchConfiguration("chassis_control").perform(context),
             "namespace": LaunchConfiguration("namespace").perform(context),
             "prefix": LaunchConfiguration("prefix").perform(context),
             "robot_name": LaunchConfiguration("robot_name").perform(context),
@@ -519,6 +552,7 @@ def generate_demo_launch_description(variant):
     for argument in odometry_launch_arguments():
         launch_description.add_action(argument)
     launch_description.add_action(external_control_launch_argument())
+    launch_description.add_action(chassis_control_launch_argument())
     launch_description.add_action(declare_namespace)
     launch_description.add_action(declare_prefix)
     launch_description.add_action(declare_robot_name)

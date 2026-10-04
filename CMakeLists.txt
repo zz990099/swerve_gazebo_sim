@@ -1,6 +1,8 @@
 cmake_minimum_required(VERSION 3.8)
 project(swerve_gazebo_sim)
 
+option(SWERVE_BUILD_CHASSIS_CONTROLLER "Build explicit chassis protocol using installed MPPI core" OFF)
+
 find_package(ament_cmake REQUIRED)
 find_package(ament_cmake_python REQUIRED)
 find_package(controller_interface REQUIRED)
@@ -15,7 +17,32 @@ ament_target_dependencies(guarded_joint_controller controller_interface pluginli
 pluginlib_export_plugin_description_file(controller_interface guarded_joint_controller.xml)
 install(TARGETS guarded_joint_controller LIBRARY DESTINATION lib)
 
-ament_python_install_package(${PROJECT_NAME})
+if(SWERVE_BUILD_CHASSIS_CONTROLLER)
+  find_package(swerve_mppi 0.20 CONFIG REQUIRED)
+  find_package(rosidl_default_generators REQUIRED)
+  find_package(geometry_msgs REQUIRED)
+  find_package(builtin_interfaces REQUIRED)
+  rosidl_generate_interfaces(${PROJECT_NAME}
+    "msg/ChassisCommand.msg" "msg/ChassisContext.msg" "msg/ChassisState.msg"
+    "msg/CircleObstacle.msg"
+    DEPENDENCIES std_msgs geometry_msgs builtin_interfaces)
+  rosidl_get_typesupport_target(chassis_typesupport ${PROJECT_NAME} "rosidl_typesupport_cpp")
+  add_library(chassis_controller SHARED src/chassis_controller.cpp)
+  target_compile_features(chassis_controller PUBLIC cxx_std_17)
+  target_include_directories(chassis_controller PRIVATE include)
+  target_link_libraries(chassis_controller swerve_mppi::core "${chassis_typesupport}")
+  ament_target_dependencies(chassis_controller controller_interface pluginlib realtime_tools std_msgs geometry_msgs)
+  pluginlib_export_plugin_description_file(controller_interface chassis_controller.xml)
+  install(TARGETS chassis_controller LIBRARY DESTINATION lib)
+  ament_export_dependencies(rosidl_default_runtime)
+  # rosidl owns the Python package target and __init__.py. Install our existing
+  # runtime modules alongside msg/, avoiding a duplicate ament Python target.
+  ament_get_python_install_dir(PYTHON_INSTALL_DIR)
+  install(DIRECTORY ${PROJECT_NAME}/ DESTINATION "${PYTHON_INSTALL_DIR}/${PROJECT_NAME}"
+    FILES_MATCHING PATTERN "*.py" PATTERN "__init__.py" EXCLUDE)
+else()
+  ament_python_install_package(${PROJECT_NAME})
+endif()
 
 install(
   DIRECTORY config launch urdf worlds docs
@@ -40,6 +67,21 @@ if(BUILD_TESTING)
   ament_target_dependencies(controller_lifecycle_tests controller_interface pluginlib std_msgs rclcpp hardware_interface)
   add_test(NAME controller_lifecycle COMMAND controller_lifecycle_tests)
   set_tests_properties(controller_lifecycle PROPERTIES TIMEOUT 30)
+
+  if(SWERVE_BUILD_CHASSIS_CONTROLLER)
+    add_executable(chassis_runtime_tests test/chassis_runtime_tests.cpp)
+    target_compile_features(chassis_runtime_tests PRIVATE cxx_std_17)
+    target_include_directories(chassis_runtime_tests PRIVATE include)
+    target_link_libraries(chassis_runtime_tests swerve_mppi::core)
+    add_test(NAME chassis_runtime COMMAND chassis_runtime_tests)
+    add_executable(chassis_interface_tests test/chassis_interface_tests.cpp)
+    target_compile_features(chassis_interface_tests PRIVATE cxx_std_17)
+    target_include_directories(chassis_interface_tests PRIVATE include)
+    target_link_libraries(chassis_interface_tests swerve_mppi::core "${chassis_typesupport}")
+    ament_target_dependencies(chassis_interface_tests controller_interface pluginlib rclcpp hardware_interface geometry_msgs)
+    add_test(NAME chassis_interface COMMAND chassis_interface_tests)
+    set_tests_properties(chassis_interface PROPERTIES TIMEOUT 30)
+  endif()
 
   ament_add_pytest_test(endpoint_config test/test_endpoint_config.py)
   ament_add_pytest_test(kinematics test/test_kinematics.py)
