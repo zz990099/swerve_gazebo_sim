@@ -55,6 +55,7 @@ public:
           {
             std::lock_guard<std::mutex> lock(input_mutex_);
             context_ = context;
+            context_history_.push(context);
             context_wall_ = wall();
             if (warm_since_ < 0 && context.valid)
               warm_since_ = context.stamp_s;
@@ -88,17 +89,16 @@ public:
           double context_wall;
           {
             std::lock_guard<std::mutex> lock(input_mutex_);
-            context = context_;
+            auto compatible = context_history_.at(feedback_.vehicle.stamp_s, context_);
+            if (!compatible)
+              return;
+            context = *compatible;
             context_wall = context_wall_;
           }
           if (wall() - context_wall >= .15) {
             cancel();
             return;
           }
-          // Independent topics can deliver context ahead of a queued state.
-          // Wait for current feedback instead of retiming either observation.
-          if (context.stamp_s > feedback_.vehicle.stamp_s + 1e-9)
-            return;
           const double start = wall();
           auto packet = bridge_->plan(feedback_, context);
           const double elapsed = wall() - start;
@@ -259,6 +259,7 @@ private:
   std::unique_ptr<PlannerBridge> bridge_;
   PlannerFeedback feedback_;
   ChassisContext context_;
+  ContextHistory context_history_;
   std::mutex input_mutex_;
   std::atomic<bool> input_poison_{false};
   rclcpp::CallbackGroup::SharedPtr planning_group_;

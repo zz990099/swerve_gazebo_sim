@@ -122,7 +122,8 @@ def test_external_control_override_requires_boolean():
 
 
 @pytest.mark.parametrize("family", ["ign", "gz"])
-def test_mppi_launch_shares_model_and_exclusive_execution(monkeypatch, family):
+@pytest.mark.parametrize("world", ["", "/tmp/physical-obstacles.sdf"])
+def test_mppi_launch_shares_model_and_exclusive_execution(monkeypatch, family, world):
     path = ROOT / "launch/mppi.launch.py"
     spec = importlib.util.spec_from_file_location("mppi_launch", path)
     module = importlib.util.module_from_spec(spec)
@@ -141,12 +142,14 @@ def test_mppi_launch_shares_model_and_exclusive_execution(monkeypatch, family):
         prefix="auto",
         headless="true",
         publish_ground_truth="true",
+        world=world,
     )
     demo = module.setup(context)[0]
     assert isinstance(demo, IncludeLaunchDescription)
     arguments = dict(demo.launch_arguments)
     assert arguments["chassis_control"] == "true"
     assert arguments["external_joint_control"] == "false"
+    assert arguments["world"] == world
     assert captured[0]["namespace"] == "/robot1"
     assert captured[0]["executable"] == "mppi_planner"
     model = captured[0]["parameters"][0]

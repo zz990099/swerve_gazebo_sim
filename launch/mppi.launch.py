@@ -42,6 +42,7 @@ def setup(context):
                     "prefix",
                     "headless",
                     "publish_ground_truth",
+                    "world",
                 )
             }
             | {"chassis_control": "true", "external_joint_control": "false"}
@@ -80,6 +81,7 @@ def generate_launch_description():
         "prefix": "",
         "headless": "false",
         "publish_ground_truth": "false",
+        "world": "",
     }
     return LaunchDescription(
         [

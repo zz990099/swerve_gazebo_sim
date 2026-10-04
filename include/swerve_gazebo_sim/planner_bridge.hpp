@@ -2,6 +2,7 @@
 #pragma once
 #include "swerve_gazebo_sim/chassis_runtime.hpp"
 #include "swerve_mppi/planning/controller.hpp"
+#include <deque>
 
 namespace swerve_gazebo_sim {
 enum class PlannerPhase { Disarmed, Arming, Running, Fault };
@@ -10,6 +11,36 @@ struct PlannerFeedback {
   bool fault = true;
   std::uint64_t session = 0;
   double next_execute_at = -1;
+};
+// Independent ROS topics need not arrive in physics timestamp order. Keep a
+// bounded history, preserving obstacle timestamps and rejecting old task data.
+class ContextHistory {
+public:
+  void push(const ChassisContext &context) {
+    if (!context.valid) {
+      history_.clear();
+      return;
+    }
+    history_.push_back(context);
+    if (history_.size() > 8)
+      history_.pop_front();
+  }
+  std::optional<ChassisContext> at(double source_stamp,
+                                 const ChassisContext &latest) const {
+    if (!latest.valid)
+      return std::nullopt;
+    std::optional<ChassisContext> best;
+    const auto task = core::CommandTask::capture(latest.input);
+    for (const auto &context : history_) {
+      if (context.stamp_s <= source_stamp + 1e-9 &&
+          source_stamp - context.stamp_s <= .15 && task.matches(context.input) &&
+          (!best || context.stamp_s >= best->stamp_s))
+        best = context;
+    }
+    return best;
+  }
+private:
+  std::deque<ChassisContext> history_;
 };
 // Transport-independent planning owner. Measurements and originating tasks
 // retain their timestamps and identity; only execution revalidates at

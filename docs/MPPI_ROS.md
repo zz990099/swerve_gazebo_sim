@@ -27,6 +27,12 @@ malformed context immediately cancels and poisons any concurrent result. Task
 identity is checked again before publication. The execution endpoint remains the
 independent owner of stopping and physical deadlines.
 
+An eight-entry context history handles independent topic arrival order. Planning
+selects the newest original obstacle observation no later than its measured state,
+within 150 ms and matching the latest full task. It never retimestamps perception
+or revives a replaced task; invalid input clears the history. The execution owner
+still checks the newest context at physical application.
+
 ## Input, output and ownership
 
 All names below are relative to the robot namespace, reliable/volatile depth one.
@@ -82,6 +88,7 @@ is blocked or exits. Restart the process to change model/frame parameters.
 
 ```bash
 python3 test/run_simulation.py --gazebo-version gz --mppi --logs artifacts/mppi
+python3 test/run_simulation.py --gazebo-version gz --mppi-paths --logs artifacts/mppi-paths
 ```
 
 The offline bridge regression uses the real MPPI Controller, TimedExecutor and
@@ -92,7 +99,16 @@ then verifies context loss and explicit stopped recovery. Existing interface,
 motion and external endpoint regressions remain enabled in both ROS/Gazebo CI
 variants.
 
-These are initial deterministic scenarios in an empty world. They do not certify
+The extended probe runs reverse/forward, a 21-point radius-2 m arc through four
+static cylindrical collision bodies, and translation with GoalOnly final yaw.
+The generated SDF and context share one obstacle fixture. It checks independent
+Gazebo truth at intervals no greater than 150 ms, including swept center-chord
+clearance with the core's 0.5 m body radius and 0.05 m margin. Position/yaw goal
+limits are 0.12 m/rad. A malformed obstacle radius while moving must cancel and
+latch; restoring valid input cannot auto-rearm. A new stopped session recovers.
+`world:=/absolute/path/world.sdf` also forwards a custom world to MPPI launch.
+
+These are bounded deterministic scenarios. They do not certify
 obstacle perception, arbitrary paths, physical collision/braking margins or slip
 robustness. Planning and feedback use encoder odometry. External localization,
 Nav2 actions and TF conversion are subsequent integration work.

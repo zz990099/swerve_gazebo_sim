@@ -117,6 +117,13 @@ jobs:
           source install/setup.bash
           python3 src/swerve_gazebo_sim/test/run_simulation.py \
             --gazebo-version "${{ matrix.family }}" --mppi --logs artifacts/mppi
+      - name: MPPI reverse, curve and physical obstacle corridor test
+        working-directory: workspace
+        run: |
+          source "/opt/ros/${ROS_DISTRO}/setup.bash"
+          source install/setup.bash
+          python3 src/swerve_gazebo_sim/test/run_simulation.py \
+            --gazebo-version "${{ matrix.family }}" --mppi-paths --logs artifacts/mppi-paths
       - name: Explicit chassis velocity and mode physical test
         working-directory: workspace
         run: |

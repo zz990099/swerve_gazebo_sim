@@ -11,6 +11,7 @@ import uuid
 from pathlib import Path
 
 import psutil
+from obstacle_fixture import corridor_world
 
 
 def simulation_environment(environment):
@@ -65,6 +66,7 @@ def main():
     parser.add_argument("--external", action="store_true")
     parser.add_argument("--chassis", action="store_true")
     parser.add_argument("--mppi", action="store_true")
+    parser.add_argument("--mppi-paths", action="store_true")
     parser.add_argument(
         "--gazebo-version",
         choices=("ign", "gz"),
@@ -72,6 +74,8 @@ def main():
     )
     parser.add_argument("--logs", default=None)
     args = parser.parse_args()
+    if args.mppi_paths:
+        args.mppi = True
     if args.mppi and (args.multi or args.external or args.chassis):
         parser.error("--mppi requires one exclusive MPPI planning owner")
     if args.chassis and (args.multi or args.external):
@@ -109,6 +113,9 @@ def main():
         ]
         if args.mppi:
             command += [f"gazebo_version:={args.gazebo_version}"]
+        if args.mppi_paths:
+            world = corridor_world(args.gazebo_version, directory / "corridor.sdf")
+            command += [f"world:={world}"]
         if args.chassis:
             command += ["chassis_control:=true"]
         if args.external:
@@ -120,7 +127,7 @@ def main():
             sys.executable,
             str(
                 Path(__file__).with_name(
-                    "smoke_mppi.py"
+                    ("smoke_mppi_paths.py" if args.mppi_paths else "smoke_mppi.py")
                     if args.mppi
                     else (
                         "smoke_chassis.py"

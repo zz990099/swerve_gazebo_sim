@@ -33,6 +33,8 @@ class Probe(Node):
         self.truth = GazeboTruth("/ground_truth/odom", family)
         self.path = [Pose2D(), Pose2D(x=0.7)]
         self.path_id = 1
+        self.obstacles = []
+        self.heading_policy = 0
         self.streaming = True
         self.max_compute = 0
         self.create_timer(0.02, self.publish_context)
@@ -52,6 +54,8 @@ class Probe(Node):
         context.header.stamp = self.state.header.stamp
         context.path_id = self.path_id
         context.path = self.path
+        context.obstacles = self.obstacles
+        context.heading_policy = self.heading_policy
         self.contexts.publish(context)
 
     def wait(self, condition, timeout=30, healthy=False):

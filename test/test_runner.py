@@ -4,14 +4,46 @@ import importlib.util
 import subprocess
 import sys
 import time
+import xml.etree.ElementTree as ET
 from pathlib import Path
 
 import psutil
+import pytest
+from obstacle_fixture import OBSTACLES, clearance, corridor_world
 
 RUNNER = Path(__file__).with_name("run_simulation.py")
 spec = importlib.util.spec_from_file_location("simulation_runner", RUNNER)
 runner = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(runner)
+
+
+@pytest.mark.parametrize("family", ["ign", "gz"])
+def test_corridor_uses_real_collision_geometry_and_keeps_physics(family, tmp_path):
+    world = (
+        ET.parse(corridor_world(family, tmp_path / "world.sdf")).getroot().find("world")
+    )
+    assert world.find("physics/max_step_size").text == "0.005"
+    assert len(world.findall("plugin")) == 3
+    models = [
+        m for m in world.findall("model") if m.get("name").startswith("corridor_")
+    ]
+    assert len(models) == 4
+    for model, (x, y, radius) in zip(models, OBSTACLES):
+        pose = list(map(float, model.find("pose").text.split()))
+        assert pose[:3] == [x, y, 0.4]
+        assert model.find("static").text == "true"
+        for kind in ("collision", "visual"):
+            cylinder = model.find(f"link/{kind}/geometry/cylinder")
+            assert float(cylinder.find("radius").text) == radius
+            assert float(cylinder.find("length").text) == 0.8
+
+
+def test_clearance_detects_crossing_even_with_clear_endpoints():
+    x, y, _ = OBSTACLES[0]
+    left, right = (x - 2, y), (x + 2, y)
+    assert clearance(left, left) > 0
+    assert clearance(right, right) > 0
+    assert clearance(left, right) < 0
 
 
 def test_each_run_has_an_independent_transport_partition():
