@@ -64,7 +64,7 @@ jobs:
       - uses: actions/checkout@v4
         with:
           repository: zz990099/swerve_mppi
-          ref: faa77abcfc54fc93a877905879f054045dee4530
+          ref: 90e9ad781f2ed7072812a1df6658431c41339b06
           path: mppi-core
       - name: Install ROS and Gazebo dependencies
         run: |

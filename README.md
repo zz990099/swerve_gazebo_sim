@@ -9,7 +9,7 @@ requires explicit stopped arming/recovery. See [MPPI_ROS.md](docs/MPPI_ROS.md).
 
 Optional `chassis_control:=true` receives typed body velocity and explicit mode
 requests, with measured confirmation and persistent mode on zero velocity.
-Build with `SWERVE_BUILD_CHASSIS_CONTROLLER=ON` and installed MPPI core 0.20.
+Build with `SWERVE_BUILD_CHASSIS_CONTROLLER=ON` and installed MPPI core 0.20.2.
 See [CHASSIS_INTERFACE.md](docs/CHASSIS_INTERFACE.md) for build, topics, timing,
 startup and recovery. Existing Twist and external-joint modes remain available
 as mutually exclusive alternatives.

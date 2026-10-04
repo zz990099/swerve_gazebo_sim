@@ -32,7 +32,7 @@ control:
   # Encoder odometry/TF and feedback diagnostics remain available.
   external_joint_control: false
   # Explicit body velocity/mode protocol. Mutually exclusive with external_joint_control.
-  # Requires -DSWERVE_BUILD_CHASSIS_CONTROLLER=ON and installed MPPI core 0.20.
+  # Requires -DSWERVE_BUILD_CHASSIS_CONTROLLER=ON and installed MPPI core 0.20.2.
   chassis_control: false
   # Hz; positive integer shared by the Python control timer and controller_manager.
   # The bundled world steps physics at 200 Hz; increasing this does not change it.

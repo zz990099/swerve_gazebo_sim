@@ -14,7 +14,7 @@ ros2 launch swerve_gazebo_sim mppi.launch.py gazebo_version:=gz
 Launch shares geometry, joint limits, frames and namespace with the execution
 controller. The shared `mode_switch_timeout` supplies the confirmation deadline
 (5 s in the bundled simulation); other model and planning parameters remain core
-0.20 defaults. The planner defaults to
+0.20.2 defaults. The planner defaults to
 60 ms per 100 ms model interval. `compute_budget_ratio` is startup-only, in
 (0, 0.7]; a late or absent planning result cancels execution. It cannot be disabled
 for live control. These defaults leave a transport margin, not a certified latency
@@ -92,6 +92,11 @@ Do not run another chassis command/context publisher alongside this node.
 The planner's independent 150 ms wall watchdog checks state and context silence,
 including simulation pauses. Execution has its own watchdog even if the planner
 is blocked or exits. Restart the process to change model/frame parameters.
+
+Core 0.20.2 is required: a GoalOnly task starting in Spin enters checked terminal
+translation once the ordered endpoint is eligible. This prevents switch costs
+from leaving short translations indefinitely in Spin. Mode dwell, measured
+stopping, mechanical confirmation and full switch/stop trajectory checks remain.
 
 ## Validation and limits
 

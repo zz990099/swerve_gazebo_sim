@@ -15,7 +15,7 @@ To enable the new interface, install the core first:
 ```bash
 git clone https://github.com/zz990099/swerve_mppi.git
 cd swerve_mppi
-git checkout faa77abcfc54fc93a877905879f054045dee4530
+git checkout 90e9ad781f2ed7072812a1df6658431c41339b06
 cmake -S . -B build -DCMAKE_BUILD_TYPE=Release \
   -DSWERVE_MPPI_BUILD_TESTS=OFF -DCMAKE_INSTALL_PREFIX="$HOME/swerve-core"
 cmake --build build --parallel 2
@@ -31,7 +31,7 @@ ros2 launch swerve_gazebo_sim demo_gz.launch.py chassis_control:=true
 `chassis_control` and `external_joint_control` are mutually exclusive. Manager
 rate is 100 Hz; model intervals are 0.1 simulation seconds. Geometry and
 wheel/steering limits and `mode_switch_timeout` come from `swerve.yaml`; other execution parameters are
-core 0.20 defaults. The planning owner must use the same configuration.
+core 0.20.2 defaults. The planning owner must use the same configuration.
 Configuration is startup-only; restart the process to change it. Generated
 messages and existing Python modules share the installed package namespace.
 
