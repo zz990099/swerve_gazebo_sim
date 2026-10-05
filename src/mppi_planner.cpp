@@ -6,7 +6,9 @@
 #include "swerve_gazebo_sim/transport_qos.hpp"
 #include <atomic>
 #include <chrono>
+#include <exception>
 #include <mutex>
+#include <thread>
 
 namespace swerve_gazebo_sim {
 class MppiPlanner : public rclcpp::Node {
@@ -43,8 +45,8 @@ public:
     if (!(config.compute_budget_ratio > 0 && config.compute_budget_ratio <= .7))
       throw std::invalid_argument("compute_budget_ratio must be in (0, 0.7]");
     bridge_ = std::make_unique<PlannerBridge>(config);
-    planning_group_ =
-        create_callback_group(rclcpp::CallbackGroupType::MutuallyExclusive);
+    planning_group_ = create_callback_group(
+        rclcpp::CallbackGroupType::MutuallyExclusive, false);
     rclcpp::SubscriptionOptions planning_options;
     planning_options.callback_group = planning_group_;
     auto qos = rclcpp::QoS(1).reliable().durability_volatile();
@@ -215,6 +217,9 @@ public:
         },
         planning_group_);
   }
+  rclcpp::CallbackGroup::SharedPtr planning_group() const {
+    return planning_group_;
+  }
 
 private:
   static double wall() {
@@ -290,10 +295,34 @@ int main(int argc, char **argv) {
   rclcpp::init(argc, argv);
   try {
     auto node = std::make_shared<swerve_gazebo_sim::MppiPlanner>();
-    rclcpp::executors::MultiThreadedExecutor executor(rclcpp::ExecutorOptions(),
-                                                      2);
-    executor.add_node(node);
-    executor.spin();
+    // Each executor has one owner thread. High-rate context and ROS-clock
+    // ingress cannot consume the planning group's scheduling opportunities.
+    // The bridge, feedback, services and watchdog remain mutually exclusive.
+    rclcpp::executors::SingleThreadedExecutor ingress, planning;
+    ingress.add_node(node);
+    planning.add_callback_group(node->planning_group(),
+                                node->get_node_base_interface());
+    std::exception_ptr ingress_error;
+    std::thread input_thread([&] {
+      try {
+        ingress.spin();
+      } catch (...) {
+        ingress_error = std::current_exception();
+        rclcpp::shutdown();
+      }
+    });
+    try {
+      planning.spin();
+    } catch (...) {
+      rclcpp::shutdown();
+      ingress.cancel();
+      input_thread.join();
+      throw;
+    }
+    ingress.cancel();
+    input_thread.join();
+    if (ingress_error)
+      std::rethrow_exception(ingress_error);
   } catch (const std::exception &e) {
     RCLCPP_ERROR(rclcpp::get_logger("mppi_planner"), "%s", e.what());
     rclcpp::shutdown();

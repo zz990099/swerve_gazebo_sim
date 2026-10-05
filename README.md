@@ -1,3 +1,7 @@
+Planning callbacks use a dedicated single-thread executor in 0.6.2; context and
+ROS-clock ingress have a separate executor. Planner/session state stays under one
+owner, with existing mutex-protected context handoff and unchanged deadlines.
+
 Snapshot channels use best-effort KeepLast(1) in 0.6.1 to avoid retransmitting old
 high-rate observations. Commands remain reliable. Repeated physical probes include
 a slow diagnostic subscriber; feedback-gap and skipped-publication counters expose

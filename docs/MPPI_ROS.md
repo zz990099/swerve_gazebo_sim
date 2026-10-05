@@ -245,3 +245,17 @@ slow diagnostic observer (200 ms per callback); it must not stall the control
 stream. This addresses snapshot backpressure; it does not guarantee scheduling
 on an arbitrarily overloaded host. All source stamps, fault latches, model error
 thresholds, coverage requirements and independent execution watchdogs are unchanged.
+
+## 0.6.2 planning executor ownership
+
+The next repeated Jazzy probe retained continuous 10 ms chassis observations and
+zero realtime publisher skips, but missed a command boundary while the planner
+remained on an older observation. QoS alone therefore did not establish bounded
+planning dispatch. The node now assigns its planning callback group explicitly to
+one single-thread executor; a separate single-thread executor owns context and
+ROS-clock ingress. This removes competition with ingress in a shared executor.
+Planning feedback, bridge/session state, arm/stop services and the watchdog still
+have one mutually exclusive owner. Context handoff retains its mutex and source
+timestamps. Both executor threads are stopped and joined on shutdown or exception.
+Repeated slow-observer physical acceptance remains the verification gate; OS/DDS
+scheduling and target-host CPU admission still need deployment qualification.
