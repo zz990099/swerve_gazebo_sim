@@ -57,6 +57,13 @@ class ModelMetrics:
             self.pending.pop(next(iter(self.pending)))
             self.unmatched += 1
 
+    def earliest_ready_source(self, latest_ns):
+        """Return the truth window needed now, avoiding work on incomplete intervals."""
+        return min(
+            (start for start, end, _, _ in self.pending.values() if end <= latest_ns),
+            default=None,
+        )
+
     def collect(self, history):
         if not history:
             return

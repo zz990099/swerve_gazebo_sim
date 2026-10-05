@@ -99,18 +99,35 @@ class Probe(Node):
         )
 
     def collect_model_metrics(self):
+        if not self.model_metrics.pending:
+            return
+        observations = self.truth.history
+        if not observations:
+            return
+        latest = observations[-1].header.stamp
+        earliest = self.model_metrics.earliest_ready_source(
+            latest.sec * 1_000_000_000 + latest.nanosec
+        )
+        if earliest is None:
+            return
         history = []
-        for observation in self.truth.history:
+        # Include one sample at/before the earliest source for interpolation.
+        # Convert only completed intervals, rather than all 512 rows every spin.
+        for observation in reversed(observations):
             stamp = observation.header.stamp
+            stamp_ns = stamp.sec * 1_000_000_000 + stamp.nanosec
             pose = observation.pose.pose
             history.append(
                 (
-                    stamp.sec * 1_000_000_000 + stamp.nanosec,
+                    stamp_ns,
                     pose.position.x,
                     pose.position.y,
                     2 * math.atan2(pose.orientation.z, pose.orientation.w),
                 )
             )
+            if stamp_ns <= earliest:
+                break
+        history.reverse()
         self.model_metrics.collect(history)
 
     def report_model_metrics(self, destination):
