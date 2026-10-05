@@ -3,6 +3,7 @@
 #include "std_srvs/srv/trigger.hpp"
 #include "swerve_gazebo_sim/msg/planner_state.hpp"
 #include "swerve_gazebo_sim/planner_conversion.hpp"
+#include "swerve_gazebo_sim/transport_qos.hpp"
 #include <atomic>
 #include <chrono>
 #include <mutex>
@@ -50,10 +51,10 @@ public:
     commands_ = create_publisher<msg::ChassisCommand>(
         "chassis_controller/command", qos);
     contexts_ = create_publisher<msg::ChassisContext>(
-        "chassis_controller/context", qos);
-    status_ = create_publisher<msg::PlannerState>("~/state", qos);
+        "chassis_controller/context", snapshot_qos());
+    status_ = create_publisher<msg::PlannerState>("~/state", snapshot_qos());
     context_sub_ = create_subscription<msg::ChassisContext>(
-        "~/context", qos, [this](msg::ChassisContext::SharedPtr m) {
+        "~/context", snapshot_qos(), [this](msg::ChassisContext::SharedPtr m) {
           auto context = decode(*m, odom_);
           {
             std::lock_guard<std::mutex> lock(input_mutex_);
@@ -71,7 +72,7 @@ public:
           contexts_->publish(*m); // Preserve the independent source timestamp.
         });
     feedback_sub_ = create_subscription<msg::ChassisState>(
-        "chassis_controller/state", qos,
+        "chassis_controller/state", snapshot_qos(),
         [this](msg::ChassisState::SharedPtr m) {
           feedback_ = decode(*m);
           state_wall_ = wall();

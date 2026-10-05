@@ -88,6 +88,7 @@ def main():
         default="ign",
     )
     parser.add_argument("--logs", default=None)
+    parser.add_argument("--slow-observer", action="store_true")
     parser.add_argument(
         "--plant-variant", choices=("nominal", "payload"), default="nominal"
     )
@@ -178,6 +179,11 @@ def main():
             probe += ["--namespace", "robot1", "--stationary-peer", "robot2"]
         if args.mppi:
             probe += ["--metrics", str(directory.resolve() / "model-metrics.json")]
+        if args.slow_observer:
+            start(
+                "slow-observer.log",
+                [sys.executable, str(Path(__file__).with_name("slow_observer.py"))],
+            )
         critical = list(processes)
         result = subprocess.Popen(probe, start_new_session=True, env=environment)
         processes.append(result)

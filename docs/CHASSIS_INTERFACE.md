@@ -40,7 +40,10 @@ messages and existing Python modules share the installed package namespace.
 
 ## Topics and units
 
-All topics are relative to the robot namespace; reliable, volatile, depth-one QoS.
+All topics are relative to the robot namespace, volatile and depth one. Commands
+remain reliable. Periodically refreshed context/state snapshots use best effort;
+state subscribers must request best effort. Stale or missing snapshots still stop
+execution under the same age/watchdog checks.
 
 | Topic | Type | Purpose |
 | --- | --- | --- |

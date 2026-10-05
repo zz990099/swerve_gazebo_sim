@@ -13,7 +13,7 @@ from geometry_msgs.msg import Pose2D
 from model_metrics import ModelMetrics, acceptance, statistics
 from rclpy.node import Node
 from rclpy.parameter import Parameter
-from smoke_chassis import seconds
+from smoke_chassis import seconds, snapshot_qos
 from std_srvs.srv import Trigger
 from swerve_gazebo_sim.msg import ChassisContext, ChassisState, PlannerState
 
@@ -27,9 +27,14 @@ class Probe(Node):
         self.model_metrics = ModelMetrics()
         self.metrics_reported = False
         self.required_modes = (0, 1, 2)
+        self.last_feedback_wall = None
+        self.last_feedback_stamp = None
+        self.feedback_publish_skips = 0
         self.timing_samples = {
             name: deque(maxlen=30000)
             for name in (
+                "feedback_wall_gap_seconds",
+                "feedback_sim_gap_seconds",
                 "context_age_seconds",
                 "command_receipt_age_seconds",
                 "command_source_age_seconds",
@@ -40,12 +45,14 @@ class Probe(Node):
         }
         self.planner = None
         self.create_subscription(
-            ChassisState, "chassis_controller/state", self.observe, 1
+            ChassisState, "chassis_controller/state", self.observe, snapshot_qos()
         )
         self.create_subscription(
-            PlannerState, "mppi_planner/state", self.observe_planner, 1
+            PlannerState, "mppi_planner/state", self.observe_planner, snapshot_qos()
         )
-        self.contexts = self.create_publisher(ChassisContext, "mppi_planner/context", 1)
+        self.contexts = self.create_publisher(
+            ChassisContext, "mppi_planner/context", snapshot_qos()
+        )
         self.arm_client = self.create_client(Trigger, "mppi_planner/arm")
         self.stop_client = self.create_client(Trigger, "mppi_planner/stop")
         # 50 Hz truth over the runner's bounded 300 s lifetime. Analysis runs
@@ -62,6 +69,21 @@ class Probe(Node):
         # add avoidable callback-queue delay while reusing an older source stamp.
 
     def observe(self, state):
+        observed_wall = time.monotonic()
+        observed_stamp = seconds(state.header.stamp)
+        if not state.fault and self.last_feedback_wall is not None:
+            self.timing_samples["feedback_wall_gap_seconds"].append(
+                observed_wall - self.last_feedback_wall
+            )
+            if observed_stamp >= self.last_feedback_stamp:
+                self.timing_samples["feedback_sim_gap_seconds"].append(
+                    observed_stamp - self.last_feedback_stamp
+                )
+        self.last_feedback_wall = observed_wall
+        self.last_feedback_stamp = observed_stamp
+        self.feedback_publish_skips = max(
+            self.feedback_publish_skips, state.feedback_publish_skips
+        )
         self.state = state
         self.publish_context()
         if not state.fault:
@@ -177,6 +199,7 @@ class Probe(Node):
         self.collect_model_metrics()
         report = self.model_metrics.summary()
         report["max_compute_seconds"] = self.max_compute
+        report["feedback_publish_skips"] = self.feedback_publish_skips
         report["sufficient_moving_samples"] = report["moving_intervals"] >= 20
         report["acceptance"] = acceptance(report, self.required_modes)
         report["timing"] = {

@@ -93,7 +93,10 @@ servo setting is not a hardware calibration.
 
 ## Input, output and ownership
 
-All names below are relative to the robot namespace, reliable/volatile depth one.
+All names below are relative to the robot namespace, volatile depth one.
+Commands remain reliable. Context and state snapshots use best effort; subscribe
+to state with best-effort QoS. Snapshot loss does not renew timestamps or disable
+any watchdog.
 
 | Interface | Type | Contract |
 | --- | --- | --- |
@@ -224,3 +227,21 @@ Tire-friction/slip, servo-lag and larger plant changes still need identification
 and separate scenario acceptance; this bounded payload test does not cover them.
 The target CPU must pass the core's 60 ms strict workload gates under expected
 load, and repeated ROS runs must retain schedule headroom and fresh context.
+
+## 0.6.1 snapshot transport
+
+A repeated Jazzy run at 0.6.0 exposed a common feedback/context gap: both the
+planner and probe retained an old state while physical time advanced, causing
+the unchanged 150 ms context gate to stop execution. Reliable high-rate snapshot
+publication can create backpressure and prevents timely newest-frame delivery.
+State/context transport now uses best effort, volatile KeepLast(1), following
+ROS sensor-data semantics. Low-rate command/session authorization remains reliable.
+Clients must request best effort for ChassisState and PlannerState; a reliable
+state subscriber is incompatible with a best-effort publisher.
+
+The message reports cumulative realtime publisher skips. Probe metrics report
+wall/simulation feedback gaps. Repeated nominal runs also attach a deliberately
+slow diagnostic observer (200 ms per callback); it must not stall the control
+stream. This addresses snapshot backpressure; it does not guarantee scheduling
+on an arbitrarily overloaded host. All source stamps, fault latches, model error
+thresholds, coverage requirements and independent execution watchdogs are unchanged.

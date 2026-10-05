@@ -104,7 +104,7 @@ int main(int argc, char **argv) {
     msg::ChassisState status;
     int count = 0;
     auto sub = observer->create_subscription<msg::ChassisState>(
-        "/chassis_test/state", 1, [&](msg::ChassisState::SharedPtr s) {
+        "/chassis_test/state", rclcpp::QoS(1).best_effort(), [&](msg::ChassisState::SharedPtr s) {
           status = *s;
           ++count;
         });

@@ -39,3 +39,5 @@ float64 command_source_age_seconds
 float64 command_schedule_slack_seconds
 geometry_msgs/Vector3 prediction_source_velocity
 geometry_msgs/Vector3 predicted_velocity
+# Cumulative high-rate samples skipped while the asynchronous publisher was busy.
+uint64 feedback_publish_skips

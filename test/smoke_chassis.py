@@ -10,6 +10,7 @@ from gazebo_truth import GazeboTruth
 from geometry_msgs.msg import Pose2D, Vector3
 from rclpy.node import Node
 from rclpy.parameter import Parameter
+from rclpy.qos import DurabilityPolicy, QoSProfile, ReliabilityPolicy
 from swerve_gazebo_sim.msg import ChassisCommand, ChassisContext, ChassisState
 
 
@@ -22,6 +23,14 @@ def seconds(t):
     return t.sec + t.nanosec * 1e-9
 
 
+def snapshot_qos():
+    return QoSProfile(
+        depth=1,
+        reliability=ReliabilityPolicy.BEST_EFFORT,
+        durability=DurabilityPolicy.VOLATILE,
+    )
+
+
 class Probe(Node):
     def __init__(self, family):
         super().__init__(
@@ -29,13 +38,13 @@ class Probe(Node):
         )
         self.state = None
         self.create_subscription(
-            ChassisState, "chassis_controller/state", self.observe, 1
+            ChassisState, "chassis_controller/state", self.observe, snapshot_qos()
         )
         self.commands = self.create_publisher(
             ChassisCommand, "chassis_controller/command", 1
         )
         self.contexts = self.create_publisher(
-            ChassisContext, "chassis_controller/context", 1
+            ChassisContext, "chassis_controller/context", snapshot_qos()
         )
         self.truth = GazeboTruth("/ground_truth/odom", family)
         self.session = 1

@@ -124,9 +124,9 @@ jobs:
           source install/setup.bash
           for repetition in 1 2; do
             python3 src/swerve_gazebo_sim/test/run_simulation.py \
-              --gazebo-version "${{ matrix.family }}" --mppi --logs "artifacts/mppi-repeat-${repetition}"
+              --gazebo-version "${{ matrix.family }}" --mppi --slow-observer --logs "artifacts/mppi-repeat-${repetition}"
             python3 src/swerve_gazebo_sim/test/run_simulation.py \
-              --gazebo-version "${{ matrix.family }}" --chassis --logs "artifacts/chassis-repeat-${repetition}"
+              --gazebo-version "${{ matrix.family }}" --chassis --slow-observer --logs "artifacts/chassis-repeat-${repetition}"
           done
           python3 src/swerve_gazebo_sim/test/run_simulation.py \
             --gazebo-version "${{ matrix.family }}" --mppi --plant-variant payload --logs artifacts/mppi-payload

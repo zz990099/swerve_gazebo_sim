@@ -1,3 +1,8 @@
+Snapshot channels use best-effort KeepLast(1) in 0.6.1 to avoid retransmitting old
+high-rate observations. Commands remain reliable. Repeated physical probes include
+a slow diagnostic subscriber; feedback-gap and skipped-publication counters expose
+remaining scheduling stalls without relaxing the 150 ms freshness protection.
+
 ## Physical acceptance and timing diagnostics (0.6)
 
 Model statistics now enforce a nominal Gazebo regression envelope, completed-truth

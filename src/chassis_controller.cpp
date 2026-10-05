@@ -5,6 +5,7 @@
 #include "realtime_tools/realtime_publisher.h"
 #include "swerve_gazebo_sim/chassis_conversion.hpp"
 #include "swerve_gazebo_sim/command_write.hpp"
+#include "swerve_gazebo_sim/transport_qos.hpp"
 #include <atomic>
 #include <chrono>
 #include <string>
@@ -141,7 +142,7 @@ public:
         });
     context_subscription_ =
         get_node()->create_subscription<msg::ChassisContext>(
-            "~/context", rclcpp::QoS(1).reliable().durability_volatile(),
+            "~/context", snapshot_qos(),
             [this](const msg::ChassisContext::SharedPtr message) {
               auto context = decode(*message, odom_frame_);
               if (!context.valid)
@@ -150,7 +151,7 @@ public:
                   std::make_shared<const ChassisContext>(std::move(context)));
             });
     status_publisher_ = get_node()->create_publisher<msg::ChassisState>(
-        "~/state", rclcpp::QoS(1));
+        "~/state", snapshot_qos());
     realtime_status_ =
         std::make_unique<realtime_tools::RealtimePublisher<msg::ChassisState>>(
             status_publisher_);
@@ -278,7 +279,10 @@ private:
   void publish_status_snapshot() {
     if (realtime_status_ && realtime_status_->trylock()) {
       realtime_status_->msg_ = encode(*runtime_, odom_frame_, body_frame_);
+      realtime_status_->msg_.feedback_publish_skips = feedback_publish_skips_;
       realtime_status_->unlockAndPublish();
+    } else if (realtime_status_) {
+      ++feedback_publish_skips_;
     }
   }
   static double wall_now() {
@@ -318,7 +322,7 @@ private:
       realtime_status_;
   std::atomic<std::uint64_t> receipt_{0};
   std::atomic<bool> poison_{false};
-  std::uint64_t activation_receipt_ = 0;
+  std::uint64_t activation_receipt_ = 0, feedback_publish_skips_ = 0;
 };
 } // namespace swerve_gazebo_sim
 PLUGINLIB_EXPORT_CLASS(swerve_gazebo_sim::ChassisController,
