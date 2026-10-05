@@ -40,6 +40,7 @@ class ModelMetrics:
         self.errors = []
         self.moving = []
         self.unmatched = 0
+        self.interrupted = 0
 
     def forecast(self, key, source_ns, end_ns, source_pose, predicted_pose):
         if self.last_key is not None and key <= self.last_key:
@@ -58,6 +59,13 @@ class ModelMetrics:
         if len(self.pending) > 4096:
             self.pending.pop(next(iter(self.pending)))
             self.unmatched += 1
+
+    def interrupt(self, session, stamp_ns):
+        """A latched stop truncates a profile; it is not model error over its full span."""
+        for key, (start, end, _, _) in list(self.pending.items()):
+            if key[0] == session and start <= stamp_ns < end:
+                del self.pending[key]
+                self.interrupted += 1
 
     def collect(self, history):
         if not history:
@@ -101,6 +109,7 @@ class ModelMetrics:
             "matched_intervals": len(self.errors),
             "moving_intervals": len(self.moving),
             "unmatched_intervals": self.unmatched,
+            "interrupted_intervals": self.interrupted,
             "pending_intervals": len(self.pending),
             "moving_translation_error_m": statistics([e[0] for e in self.moving]),
             "moving_yaw_error_rad": statistics([e[1] for e in self.moving]),

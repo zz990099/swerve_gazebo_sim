@@ -34,7 +34,10 @@ They compare one-interval model motion with independent Gazebo truth in each
 observation's own starting body frame, avoiding accumulated encoder/world frame
 offsets. Truth is interpolated only between observations no more than 40 ms apart,
 never extrapolated. Reports include matched/moving/unmatched/pending counts and
-moving-interval translation/yaw RMS, P95 and maximum error. At least five moving
+moving-interval translation/yaw RMS, P95 and maximum error. A latched stop removes
+the truncated installed interval and counts it separately as interrupted;
+an intentionally cancelled profile is not treated as full-interval model error.
+At least five moving
 intervals must be observed; missing matches cannot masquerade as zero error.
 The probe reports error rather than inventing a calibrated safety tolerance.
 Measure braking, turning and mode transitions under intended mass, friction and

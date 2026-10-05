@@ -49,6 +49,11 @@ class Probe(Node):
 
     def observe(self, state):
         self.state = state
+        if state.fault:
+            self.model_metrics.interrupt(
+                state.session_id,
+                state.header.stamp.sec * 1_000_000_000 + state.header.stamp.nanosec,
+            )
         if state.has_prediction:
 
             def ns(stamp):

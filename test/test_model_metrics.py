@@ -72,6 +72,22 @@ class ModelMetricsTests(unittest.TestCase):
         self.assertEqual(metrics.summary()["pending_intervals"], 3000)
         self.assertEqual(metrics.summary()["unmatched_intervals"], 0)
 
+    def test_stop_excludes_only_the_truncated_installed_interval(self):
+        metrics = ModelMetrics()
+        for sequence in range(2):
+            start = sequence * 100_000_000
+            metrics.forecast(
+                (1, sequence), start, start + 100_000_000, (0, 0, 0), (0.1, 0, 0)
+            )
+        metrics.interrupt(2, 150_000_000)
+        self.assertEqual(len(metrics.pending), 2)
+        metrics.interrupt(1, 150_000_000)
+        metrics.interrupt(1, 150_000_000)
+        metrics.collect([(0, 0, 0, 0), (100_000_000, 0.1, 0, 0)])
+        self.assertEqual(metrics.summary()["interrupted_intervals"], 1)
+        self.assertEqual(metrics.summary()["matched_intervals"], 1)
+        self.assertLess(metrics.summary()["moving_translation_error_m"]["max"], 1e-12)
+
 
 if __name__ == "__main__":
     unittest.main()
