@@ -47,6 +47,7 @@ jobs:
             image: ros:jazzy-ros-base-noble
     container:
       image: ${{ matrix.image }}
+      options: --cap-add SYS_PTRACE --security-opt seccomp=unconfined
     defaults:
       run:
         shell: bash
@@ -70,7 +71,7 @@ jobs:
         run: |
           apt-get update
           apt-get install --no-install-recommends -y \
-            build-essential cmake python3-colcon-common-extensions \
+            build-essential cmake gdb python3-colcon-common-extensions \
             python3-rosdep python3-pytest \
             "ros-${ROS_DISTRO}-ros-gz" "ros-${ROS_DISTRO}-gz-ros2-control"
           if [[ ! -f /etc/ros/rosdep/sources.list.d/20-default.list ]]; then

@@ -2,6 +2,7 @@
 
 import argparse
 import os
+import shutil
 import signal
 import subprocess
 import sys
@@ -58,6 +59,44 @@ def stop_descendants(tracked):
             if child.is_running() and child.status() != psutil.STATUS_ZOMBIE:
                 raise RuntimeError(f"Simulation descendant {child.pid} did not exit")
         except psutil.NoSuchProcess:
+            pass
+
+
+def capture_failure_backtraces(tracked, directory):
+    """Record blocked owner/transport threads before failed-run cleanup."""
+    debugger = shutil.which("gdb")
+    if debugger is None:
+        return
+    for child in tracked.values():
+        try:
+            executable = Path(child.exe()).name
+            if executable != "mppi_planner" and not any(
+                part in ("sim", "gazebo") for part in child.cmdline()
+            ):
+                continue
+            path = directory / f"backtrace-{executable}-{child.pid}.log"
+            with path.open("w") as output:
+                try:
+                    subprocess.run(
+                        [
+                            debugger,
+                            "--batch",
+                            "-ex",
+                            "set pagination off",
+                            "-ex",
+                            "thread apply all bt",
+                            "-p",
+                            str(child.pid),
+                        ],
+                        stdout=output,
+                        stderr=subprocess.STDOUT,
+                        timeout=10,
+                        check=False,
+                    )
+                except subprocess.TimeoutExpired:
+                    output.write("Backtrace capture timed out\n")
+            print(path.read_text()[-24000:], flush=True)
+        except (psutil.NoSuchProcess, psutil.AccessDenied):
             pass
 
 
@@ -200,6 +239,8 @@ def main():
             returncode = 1
             print("FAIL: launch exited early or test timed out", flush=True)
         if returncode:
+            track_descendants(processes, descendants)
+            capture_failure_backtraces(descendants, directory)
             for name in ("demo.log", "peer.log"):
                 path = directory / name
                 if path.exists():
