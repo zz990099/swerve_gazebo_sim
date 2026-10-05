@@ -259,3 +259,29 @@ have one mutually exclusive owner. Context handoff retains its mutex and source
 timestamps. Both executor threads are stopped and joined on shutdown or exception.
 Repeated slow-observer physical acceptance remains the verification gate; OS/DDS
 scheduling and target-host CPU admission still need deployment qualification.
+
+## Validation evidence and unresolved timing attribution (2026-10-05)
+
+Commit `4cc9173694564ca26d2011377635c7f7fadbebb7` passed
+[run 37303043481](https://github.com/zz990099/swerve_gazebo_sim/actions/runs/37303043481)
+on Humble/Fortress and Jazzy/Harmonic: 16/16 CTest groups and 173 reported tests
+per family, plus the full physical sequence. Each family completed three nominal
+MPPI probes, three explicit-chassis probes, the 25% payload probe, reverse/curve/
+obstacle corridor, mode/motion probes and publisher-loss protection. Repeated
+nominal probes include the 200 ms diagnostic reader. All ten MPPI model reports
+passed error, per-mode/braking moving-sample and completed-truth coverage gates.
+The worst reported moving error across these reports was 2.337 mm translation
+and 0.010323 rad yaw; the lowest completed-truth coverage was 98.598%.
+
+Earlier executor-isolated commit `5c1c2e2bfb99c71bc199ed5d3dc001862a3f2e7e`
+still failed one nominal Jazzy probe and one repeated explicit-chassis Humble
+probe with missing-command-boundary faults in
+[run 37302216538](https://github.com/zz990099/swerve_gazebo_sim/actions/runs/37302216538).
+Both endpoints latched a stop. The exact OS/executor/DDS cause was not established;
+the passing run above does not prove these intermittent stalls are eliminated.
+The runner now captures planner and simulator thread backtraces before failed-run
+cleanup when gdb is available. CI permits tracing inside its isolated container.
+No backtrace was captured in the passing run because no probe failed. Long-duration
+target-platform testing, strict CPU workload admission and review of any captured
+stall remain necessary before deployment. No freshness, deadline, error or truth
+coverage threshold was relaxed to obtain the passing result.
