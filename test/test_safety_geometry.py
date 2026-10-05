@@ -6,6 +6,7 @@ import unittest
 from pathlib import Path
 
 import yaml
+
 from swerve_gazebo_sim.bringup import controller_config, load_config, safety_parameters
 
 ROOT = Path(__file__).resolve().parents[1]

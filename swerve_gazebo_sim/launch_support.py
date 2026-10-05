@@ -10,7 +10,6 @@ from functools import partial
 import xacro
 import yaml
 from ament_index_python.packages import get_package_share_directory
-from launch import LaunchDescription
 from launch.actions import (
     DeclareLaunchArgument,
     EmitEvent,
@@ -24,6 +23,8 @@ from launch.events import Shutdown
 from launch.launch_description_sources import PythonLaunchDescriptionSource
 from launch.substitutions import LaunchConfiguration
 from launch_ros.actions import Node
+
+from launch import LaunchDescription
 
 from .bringup import ODOMETRY_DEFAULTS, controller_config, load_config, names
 

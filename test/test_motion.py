@@ -3,6 +3,7 @@
 from pathlib import Path
 
 import pytest
+
 from swerve_gazebo_sim.bringup import load_config, validate_control
 from swerve_gazebo_sim.kinematics import DriveMode, SwerveKinematics
 from swerve_gazebo_sim.motion import MotionSupervisor, TransitionPhase

@@ -4,8 +4,9 @@ import importlib.util
 from pathlib import Path
 
 import pytest
-from launch import LaunchContext
 from launch.actions import DeclareLaunchArgument, IncludeLaunchDescription
+
+from launch import LaunchContext
 from swerve_gazebo_sim import launch_support
 
 ROOT = Path(__file__).resolve().parents[1]

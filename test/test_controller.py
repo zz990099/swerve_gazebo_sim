@@ -2,11 +2,12 @@ import math
 
 import pytest
 import rclpy
-import swerve_gazebo_sim.controller as controller_module
 from geometry_msgs.msg import TwistStamped
 from rclpy.parameter import Parameter
 from rclpy.time import Time
 from sensor_msgs.msg import JointState
+
+import swerve_gazebo_sim.controller as controller_module
 from swerve_gazebo_sim.controller import SwerveController
 from swerve_gazebo_sim.kinematics import DriveMode
 from swerve_gazebo_sim.motion import TransitionPhase

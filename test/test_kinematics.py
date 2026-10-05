@@ -1,6 +1,7 @@
 import math
 
 import pytest
+
 from swerve_gazebo_sim.kinematics import (
     DriveMode,
     SwerveKinematics,
