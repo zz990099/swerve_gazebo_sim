@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 #include "swerve_gazebo_sim/chassis_runtime.hpp"
+#include "swerve_mppi/planning/controller.hpp"
 #include <iostream>
 #include <stdexcept>
 using namespace swerve_gazebo_sim;
@@ -56,6 +57,10 @@ int main() {
             "stationary encoder roundoff must not reject zero-wheel arm");
     Fixture f;
     f.tick(f.command(core::DriveMode::Crab), true);
+    require(f.runtime.prediction().has_value() &&
+                std::abs(f.runtime.prediction()->stamp_s -
+                         f.runtime.next_tick()) < 1e-9,
+            "installed profile must expose its original prediction interval");
     for (int i = 0; i < 5; ++i)
       f.tick(f.command(core::DriveMode::Crab, {.2, 0, 0}));
     require(f.runtime.state().actual_mode == core::DriveMode::Crab &&
@@ -93,6 +98,31 @@ int main() {
     auto changed = f.packet(switch_command);
     f.runtime.update(f.now, f.wall, f.joints, f.context, changed);
     require(f.runtime.fault(), "mutated request must latch");
+    require(!f.runtime.prediction(),
+            "fault cannot retain an authorized prediction");
+
+    // A large physical body must use the same bound in planning and execution.
+    core::Config large;
+    large.robot_radius_m = .72;
+    large.compute_budget_ratio = 0;
+    ChassisContext occupied;
+    occupied.valid = true;
+    occupied.stamp_s = 1;
+    occupied.input.reference_path = {{0, 0, 0}, {1, 0, 0}};
+    occupied.input.obstacles = {{.65, 0, .03}};
+    occupied.input.vehicle.stamp_s = 1;
+    require(
+        !core::Controller(large).compute(occupied.input).command,
+        "large body cannot authorize motion through its occupied footprint");
+    ChassisRuntime large_runtime(large);
+    auto large_arm = f.packet(f.command(core::DriveMode::DualAckermann), true);
+    large_arm.envelope = {
+        9, 1, 1,     f.command(core::DriveMode::DualAckermann),
+        1, 1, 1.025, core::CommandTask::capture(occupied.input)};
+    large_arm.wall_s = 10;
+    large_runtime.update(1, 10, {}, occupied, large_arm);
+    require(large_runtime.fault() && !large_runtime.prediction(),
+            "execution cannot arm inside the large physical footprint");
 
     Fixture lost;
     lost.tick(lost.command(core::DriveMode::DualAckermann), true);

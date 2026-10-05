@@ -1,4 +1,45 @@
-# MPPI ROS planning adapter (0.4)
+# MPPI ROS planning adapter (0.5)
+
+## Collision geometry and physical model measurement
+
+`config/swerve.yaml` has an optional `safety` mapping. Legacy files without it
+use `robot_radius: auto` and `collision_margin: 0.05`. Automatic radius covers
+both the chassis box and every steering angle of the wheel collision cylinders:
+
+```
+max(hypot(body_length/2, body_width/2),
+    hypot(wheelbase/2, track_width/2) + hypot(wheel_radius, wheel_width/2))
+```
+
+The bound rounds outwards to centimetres, retaining 0.5 m for the default model.
+A numeric `robot_radius` must be finite, positive and no smaller than that bound;
+the separately configured margin is finite and nonnegative. Both resolved values
+reach the planner and execution validator from the same configuration. A 1.4 m
+body automatically uses 0.72 m, so an obstacle already inside that body cannot be
+authorized using the old 0.5 m envelope. Restart to change safety parameters.
+Directly launched nodes must receive these same resolved parameters; adding new
+collision geometry requires updating this bound before using the model.
+
+`ChassisState` adds diagnostic `has_prediction`, source stamp/pose, and endpoint
+stamp/pose from the actual installed checked profile. Faults clear the forecast.
+These fields do not authorize execution, renew a source timestamp or replace
+measured feedback. Rebuild all consumers after this message change.
+
+Both physical MPPI probes now export `model-metrics.json` in their log directory.
+They compare one-interval model motion with independent Gazebo truth in each
+observation's own starting body frame, avoiding accumulated encoder/world frame
+offsets. Truth is interpolated only between observations no more than 40 ms apart,
+never extrapolated. Reports include matched/moving/unmatched/pending counts and
+moving-interval translation/yaw RMS, P95 and maximum error. At least five moving
+intervals must be observed; missing matches cannot masquerade as zero error.
+The probe reports error rather than inventing a calibrated safety tolerance.
+Measure braking, turning and mode transitions under intended mass, friction and
+servo settings before selecting uncertainty margins or claiming model agreement.
+
+For target-host capacity, build core measurement tools and run
+`swerve_mppi_integration_budget 200 --budget-ratio 0.6 --strict`.
+This fails on any compute timeout or measured pipeline overrun; ordinary CI only
+records timing because runner speed is not a portable acceptance requirement.
 
 Build with `SWERVE_BUILD_CHASSIS_CONTROLLER=ON` and the pinned installed standalone
 core described in [CHASSIS_INTERFACE.md](CHASSIS_INTERFACE.md). The core repository

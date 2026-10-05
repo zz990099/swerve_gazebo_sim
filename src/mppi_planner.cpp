@@ -23,6 +23,9 @@ public:
       throw std::invalid_argument(
           "Distinct body_frame and odom_frame required");
     core::Config config;
+    config.robot_radius_m = number("robot_radius_m", config.robot_radius_m);
+    config.collision_margin_m =
+        number("collision_margin_m", config.collision_margin_m);
     config.wheelbase_m = number("wheelbase_m", config.wheelbase_m);
     config.track_m = number("track_m", config.track_m);
     config.wheel_radius_m = number("wheel_radius_m", config.wheel_radius_m);

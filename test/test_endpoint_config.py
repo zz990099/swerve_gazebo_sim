@@ -61,7 +61,6 @@ def test_explicit_chassis_claims_all_joints_and_maps_units():
 
 def test_chassis_and_external_owners_cannot_coexist():
     import pytest
-
     from swerve_gazebo_sim.bringup import validate_control
 
     cfg = load_config(ROOT / "config/swerve.yaml")["control"]

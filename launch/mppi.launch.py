@@ -4,6 +4,7 @@
 import os
 
 from ament_index_python.packages import get_package_share_directory
+from launch import LaunchDescription
 from launch.actions import (
     DeclareLaunchArgument,
     IncludeLaunchDescription,
@@ -12,9 +13,12 @@ from launch.actions import (
 from launch.launch_description_sources import PythonLaunchDescriptionSource
 from launch.substitutions import LaunchConfiguration
 from launch_ros.actions import Node
-
-from launch import LaunchDescription
-from swerve_gazebo_sim.bringup import gazebo_variant, load_config, names
+from swerve_gazebo_sim.bringup import (
+    gazebo_variant,
+    load_config,
+    names,
+    safety_parameters,
+)
 
 
 def setup(context):
@@ -65,6 +69,7 @@ def setup(context):
                 "max_wheel_accel_mps2": c["max_wheel_acceleration"] * g["wheel_radius"],
                 "max_steer_rate_radps": c["max_steering_rate"],
                 "confirmation_timeout_s": c["mode_switch_timeout"],
+                **safety_parameters(configuration),
             }
         ],
     )

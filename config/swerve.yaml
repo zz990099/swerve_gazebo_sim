@@ -115,6 +115,14 @@ control:
   # (rad/s)^2 for wz. This value does not change simulation sensor noise.
   twist_variance: 0.02
 
+# Collision geometry is independent of motion limits. "auto" covers the chassis
+# box and the full steering sweep of all wheel collision cylinders, rounded
+# outwards to centimetres. A numeric radius must cover that same geometry.
+# The margin is additional clearance; it cannot replace physical geometry.
+safety:
+  robot_radius: auto
+  collision_margin: 0.05
+
 # Not configurable here: body-level speed/acceleration caps, steering acceleration,
 # joint torque limits, tire friction, suspension or world physics step. Some model
 # properties are fixed in the Xacro/world; adding unrecognised YAML keys is rejected.

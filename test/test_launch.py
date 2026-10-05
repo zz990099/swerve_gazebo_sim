@@ -4,9 +4,8 @@ import importlib.util
 from pathlib import Path
 
 import pytest
-from launch.actions import DeclareLaunchArgument, IncludeLaunchDescription
-
 from launch import LaunchContext
+from launch.actions import DeclareLaunchArgument, IncludeLaunchDescription
 from swerve_gazebo_sim import launch_support
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -159,3 +158,48 @@ def test_mppi_launch_shares_model_and_exclusive_execution(monkeypatch, family, w
     assert model["max_wheel_accel_mps2"] == 4.0
     assert model["use_sim_time"] is True
     assert model["confirmation_timeout_s"] == 5.0
+    assert model["robot_radius_m"] == 0.5
+    assert model["collision_margin_m"] == 0.05
+
+
+def test_mppi_launch_uses_custom_collision_bound(monkeypatch, tmp_path):
+    import yaml
+
+    path = ROOT / "launch/mppi.launch.py"
+    spec = importlib.util.spec_from_file_location("large_mppi_launch", path)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    monkeypatch.setattr(
+        module, "get_package_share_directory", lambda package: str(ROOT)
+    )
+    cfg = module.load_config(ROOT / "config/swerve.yaml")
+    cfg["geometry"]["body_length"] = 1.4
+    cfg["safety"]["collision_margin"] = 0.08
+    config = tmp_path / "large.yaml"
+    config.write_text(yaml.safe_dump(cfg))
+    captured = []
+    monkeypatch.setattr(module, "Node", lambda **kwargs: captured.append(kwargs))
+    context = LaunchContext()
+    context.launch_configurations.update(
+        gazebo_version="gz",
+        config=str(config),
+        namespace="",
+        robot_name="robot",
+        prefix="",
+        headless="true",
+        publish_ground_truth="true",
+        world="",
+    )
+    module.setup(context)
+    planner = captured[0]["parameters"][0]
+    from swerve_gazebo_sim.bringup import controller_config
+
+    execution = controller_config(
+        ROOT / "config/controllers.yaml",
+        dict(cfg, control=dict(cfg["control"], chassis_control=True)),
+        "",
+        "",
+    )["/chassis_controller"]["ros__parameters"]
+    for key in ("robot_radius_m", "collision_margin_m"):
+        assert planner[key] == execution[key]
+    assert planner["robot_radius_m"] == 0.72

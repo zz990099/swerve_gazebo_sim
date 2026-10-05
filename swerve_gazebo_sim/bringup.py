@@ -67,6 +67,48 @@ ODOMETRY_DEFAULTS = {
     "odom_child_frame": "",
 }
 COMMAND_DEFAULTS = {"external_joint_control": False, "chassis_control": False}
+SAFETY_DEFAULTS = {"robot_radius": "auto", "collision_margin": 0.05}
+
+
+def safety_parameters(configuration):
+    """Bound the complete XY collision geometry, including every steering angle."""
+    g = configuration["geometry"]
+    safety = configuration.get("safety", SAFETY_DEFAULTS)
+    if not isinstance(safety, dict) or set(safety) != set(SAFETY_DEFAULTS):
+        raise ValueError("safety must contain robot_radius and collision_margin")
+    minimum = max(
+        math.hypot(g["body_length"] / 2, g["body_width"] / 2),
+        math.hypot(g["wheelbase"] / 2, g["track_width"] / 2)
+        + math.hypot(g["wheel_radius"], g["wheel_width"] / 2),
+    )
+    radius = safety["robot_radius"]
+    if radius == "auto":
+        # Round outwards to centimetres; the bundled geometry retains 0.5 m.
+        if not math.isfinite(minimum * 100):
+            raise ValueError("unrepresentable collision geometry")
+        radius = math.ceil(minimum * 100) / 100
+        radius = max(radius, minimum)
+    if (
+        isinstance(radius, bool)
+        or not isinstance(radius, (int, float))
+        or not math.isfinite(radius)
+        or radius < minimum
+        or radius <= 0
+    ):
+        raise ValueError(
+            f"robot_radius must cover the collision geometry ({minimum} m)"
+        )
+    margin = safety["collision_margin"]
+    if (
+        isinstance(margin, bool)
+        or not isinstance(margin, (int, float))
+        or not math.isfinite(margin)
+        or margin < 0
+        or not math.isfinite(radius + margin)
+    ):
+        raise ValueError("collision_margin must be finite and nonnegative")
+    return {"robot_radius_m": float(radius), "collision_margin_m": float(margin)}
+
 
 GAZEBO_VARIANTS = {
     "ign": {
@@ -102,8 +144,13 @@ def gazebo_variant(name):
 def load_config(path):
     with open(path, encoding="utf-8") as stream:
         cfg = yaml.safe_load(stream)
-    if not isinstance(cfg, dict) or set(cfg) != {"geometry", "control"}:
-        raise ValueError("Configuration must contain geometry and control mappings")
+    if (
+        not isinstance(cfg, dict)
+        or not {"geometry", "control"} <= set(cfg)
+        or set(cfg) - {"geometry", "control", "safety"}
+    ):
+        raise ValueError("Configuration requires geometry/control and optional safety")
+    cfg.setdefault("safety", dict(SAFETY_DEFAULTS))
     if isinstance(cfg["control"], dict):
         for key, value in {
             **TRANSITION_DEFAULTS,
@@ -150,6 +197,7 @@ def load_config(path):
         )
     if geometry["wheelbase"] <= 2 * geometry["wheel_radius"]:
         raise ValueError("wheelbase must exceed the wheel diameter")
+    safety_parameters(cfg)
     return cfg
 
 
@@ -223,6 +271,7 @@ def controller_config(template, cfg, namespace, prefix):
                 "max_wheel_accel_mps2": c["max_wheel_acceleration"] * g["wheel_radius"],
                 "max_steer_rate_radps": c["max_steering_rate"],
                 "confirmation_timeout_s": c["mode_switch_timeout"],
+                **safety_parameters(cfg),
             }
         }
     return {f"{namespace}/{key}": value for key, value in data.items()}

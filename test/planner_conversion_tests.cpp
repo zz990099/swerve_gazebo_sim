@@ -7,6 +7,28 @@ void require(bool ok, const char *why) {
     throw std::runtime_error(why);
 }
 int main() {
+  ChassisRuntime runtime;
+  ChassisContext context;
+  context.valid = true;
+  context.stamp_s = 1;
+  context.input.reference_path = {{0, 0, 0}, {1, 0, 0}};
+  core::Output zero;
+  zero.command = core::ChassisCommand{};
+  ChassisPacket arm;
+  arm.arm = true;
+  arm.receipt = 1;
+  arm.wall_s = 10;
+  arm.envelope = {1, 1, 1,     zero,
+                  1, 1, 1.025, core::CommandTask::capture(context.input)};
+  runtime.update(1, 10, {}, context, arm);
+  const auto predicted = encode(runtime, "odom", "base_footprint");
+  require(predicted.has_prediction &&
+              seconds(predicted.prediction_source_stamp) == 1 &&
+              std::abs(seconds(predicted.prediction_stamp) - 1.1) < 1e-9,
+          "prediction diagnostics must preserve the installed interval");
+  runtime.stop();
+  require(!encode(runtime, "odom", "base_footprint").has_prediction,
+          "faulted feedback cannot advertise an installed prediction");
   msg::ChassisState state;
   state.header.stamp = stamp(2.03);
   state.actual_mode = 2;

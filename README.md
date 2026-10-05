@@ -151,6 +151,13 @@ Encoder odometry is not independent ground truth.
 
 `config/swerve.yaml` is the geometry and motion-limit source used by both model
 generation and control. Copy it and pass `config:=/absolute/path/custom.yaml`.
+The optional `safety` section also binds MPPI collision checks to this geometry.
+`robot_radius: auto` encloses the body and full wheel steering sweep, rounded
+outwards to centimetres; an explicit smaller radius is rejected. The additional
+`collision_margin` defaults to 0.05 m. Legacy geometry/control files remain valid.
+Both MPPI physical probes save installed-profile prediction error statistics as
+`model-metrics.json`; see [docs/MPPI_ROS.md](docs/MPPI_ROS.md) for their measurement
+contract and target-host performance acceptance.
 All fields are startup parameters; restart after changing geometry. Launch validates
 positive dimensions and wheel clearance. The initial default is a 0.60 m wheelbase,
 0.50 m track, 0.10 m wheel radius and 0.80 × 0.28 × 0.16 m body.

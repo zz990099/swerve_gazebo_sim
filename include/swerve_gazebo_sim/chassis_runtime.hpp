@@ -28,6 +28,7 @@ public:
         guard_(limits(config)) {}
   void stop(EndpointFault reason = EndpointFault::Disarmed) {
     fault_ = true;
+    prediction_.reset();
     pending_.reset();
     guard_.deactivate(reason);
     feedback_.fault = true;
@@ -36,6 +37,13 @@ public:
   bool fault() const { return fault_; }
   EndpointFault reason() const { return guard_.fault_reason(); }
   const core::VehicleState &state() const { return state_; }
+  // Diagnostics only: the exact checked profile installed at application.
+  const std::optional<core::VehicleState> &prediction() const {
+    return prediction_;
+  }
+  const core::VehicleState &prediction_start() const {
+    return prediction_start_;
+  }
   core::TransitionPhase phase() const { return phase_; }
   std::uint64_t session() const { return session_; }
   std::uint64_t sequence() const { return sequence_; }
@@ -142,6 +150,8 @@ public:
           rejection_detail_ = 4;
           stop(EndpointFault::CommandRejected);
         } else {
+          prediction_start_ = result.actuation->start();
+          prediction_ = result.actuation->endpoint().state;
           next_tick_s_ = now + config_.dt_s;
         }
       }
@@ -259,6 +269,8 @@ private:
   EndpointGuard guard_;
   std::unique_ptr<core::TimedExecutor> executor_;
   core::VehicleState state_;
+  core::VehicleState prediction_start_;
+  std::optional<core::VehicleState> prediction_;
   core::ModeFeedback feedback_;
   core::TransitionPhase phase_ = core::TransitionPhase::Fault;
   core::TimingError timing_error_ = core::TimingError::None;

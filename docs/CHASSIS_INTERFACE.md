@@ -5,7 +5,10 @@ all eight ros2_control command interfaces, replacing either the default Twist
 controller or external joint endpoint. It never infers mode from velocity.
 It reuses installed MPPI 0.20 `TimedExecutor`, `ProfileRunner` and the existing
 `EndpointGuard`. Stochastic planning remains outside the controller manager.
-This change does not add an MPPI planning node or Nav2 adapter.
+The companion `mppi.launch.py` starts the implemented MPPI planning node; Nav2
+lifecycle/TF integration remains separate. Shared `safety` configuration now
+propagates the physical collision bound and margin to both planning and execution;
+see [MPPI_ROS.md](MPPI_ROS.md) for geometry and prediction diagnostics.
 
 ## Build and start
 
@@ -15,7 +18,7 @@ To enable the new interface, install the core first:
 ```bash
 git clone https://github.com/zz990099/swerve_mppi.git
 cd swerve_mppi
-git checkout 90e9ad781f2ed7072812a1df6658431c41339b06
+git checkout b1e0057b09fb8f9ca08a9e940386680d55a91469
 cmake -S . -B build -DCMAKE_BUILD_TYPE=Release \
   -DSWERVE_MPPI_BUILD_TESTS=OFF -DCMAKE_INSTALL_PREFIX="$HOME/swerve-core"
 cmake --build build --parallel 2

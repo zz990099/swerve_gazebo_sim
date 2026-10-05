@@ -5,6 +5,7 @@ import os
 import signal
 import subprocess
 import threading
+from collections import deque
 from types import SimpleNamespace
 
 
@@ -42,6 +43,8 @@ class GazeboTruth:
     def __init__(self, topic, family):
         self._latest = None
         self._error = None
+        self._history = deque(maxlen=512)
+        self._lock = threading.Lock()
         self.process = subprocess.Popen(
             [family, "topic", "-e", "-t", topic, "--json-output"],
             stdout=subprocess.PIPE,
@@ -55,7 +58,10 @@ class GazeboTruth:
         try:
             for line in self.process.stdout:
                 if line.lstrip().startswith("{"):
-                    self._latest = decode_odometry(json.loads(line))
+                    message = decode_odometry(json.loads(line))
+                    with self._lock:
+                        self._latest = message
+                        self._history.append(message)
         except (ValueError, KeyError, TypeError) as error:
             self._error = str(error)
 
@@ -66,6 +72,11 @@ class GazeboTruth:
         if self.process.poll() is not None:
             raise RuntimeError("Gazebo truth reader exited before the test finished")
         return self._latest
+
+    @property
+    def history(self):
+        with self._lock:
+            return tuple(self._history)
 
     def close(self):
         try:

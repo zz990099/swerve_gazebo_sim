@@ -155,6 +155,8 @@ def main():
                 ],
             )
             probe += ["--namespace", "robot1", "--stationary-peer", "robot2"]
+        if args.mppi:
+            probe += ["--metrics", str(directory.resolve() / "model-metrics.json")]
         critical = list(processes)
         result = subprocess.Popen(probe, start_new_session=True, env=environment)
         processes.append(result)

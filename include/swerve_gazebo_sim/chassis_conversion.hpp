@@ -131,6 +131,19 @@ inline msg::ChassisState encode(const ChassisRuntime &r,
   m.timing_error = static_cast<std::uint8_t>(r.timing_error());
   m.safety_error = static_cast<std::uint8_t>(r.safety_error());
   m.next_execute_at = stamp(r.next_tick());
+  m.has_prediction = !r.fault() && r.prediction().has_value();
+  if (m.has_prediction) {
+    const auto &start = r.prediction_start();
+    const auto &end = *r.prediction();
+    m.prediction_source_stamp = stamp(start.stamp_s);
+    m.prediction_source_pose.x = start.pose.x;
+    m.prediction_source_pose.y = start.pose.y;
+    m.prediction_source_pose.theta = start.pose.yaw;
+    m.prediction_stamp = stamp(end.stamp_s);
+    m.predicted_pose.x = end.pose.x;
+    m.predicted_pose.y = end.pose.y;
+    m.predicted_pose.theta = end.pose.yaw;
+  }
   return m;
 }
 } // namespace swerve_gazebo_sim

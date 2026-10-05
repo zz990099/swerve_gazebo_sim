@@ -81,6 +81,7 @@ class PathProbe(Probe):
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--gazebo-version", choices=("gz", "ign"), required=True)
+    parser.add_argument("--metrics", default=None)
     args = parser.parse_args()
     rclpy.init()
     node = PathProbe(args.gazebo_version)
@@ -138,6 +139,7 @@ def main():
         node.hold(0.4)
         assert node.state.session_id > session and node.stopped()
         assert node.max_compute < 0.075
+        node.report_model_metrics(args.metrics)
         print(
             f"PASS: reverse, curved physical corridor, terminal yaw, malformed obstacles, latched stop and recovery; min_clearance={node.min_clearance:.4f}m max_compute={node.max_compute:.4f}s",
             flush=True,

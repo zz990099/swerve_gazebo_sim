@@ -1,12 +1,15 @@
 """Verify actual MPPI planning, measured completion and context-loss stop in Gazebo."""
 
 import argparse
+import json
 import math
 import time
+from pathlib import Path
 
 import rclpy
 from gazebo_truth import GazeboTruth
 from geometry_msgs.msg import Pose2D
+from model_metrics import ModelMetrics
 from rclpy.node import Node
 from rclpy.parameter import Parameter
 from smoke_chassis import seconds
@@ -20,6 +23,7 @@ class Probe(Node):
             "mppi_probe", parameter_overrides=[Parameter("use_sim_time", value=True)]
         )
         self.state = None
+        self.model_metrics = ModelMetrics()
         self.planner = None
         self.create_subscription(
             ChassisState, "chassis_controller/state", self.observe, 1
@@ -42,6 +46,21 @@ class Probe(Node):
 
     def observe(self, state):
         self.state = state
+        if state.has_prediction:
+
+            def ns(stamp):
+                return stamp.sec * 1_000_000_000 + stamp.nanosec
+
+            def pose(value):
+                return value.x, value.y, value.theta
+
+            self.model_metrics.forecast(
+                (state.session_id, state.sequence),
+                ns(state.prediction_source_stamp),
+                ns(state.prediction_stamp),
+                pose(state.prediction_source_pose),
+                pose(state.predicted_pose),
+            )
         if not state.fault and (
             math.hypot(state.velocity.x, state.velocity.y) > 0.03
             or abs(state.velocity.z) > 0.04
@@ -68,6 +87,7 @@ class Probe(Node):
         deadline = time.monotonic() + timeout
         while time.monotonic() < deadline:
             rclpy.spin_once(self, timeout_sec=0.005)
+            self.collect_model_metrics()
             if healthy and self.state and self.state.fault:
                 raise AssertionError(
                     f"Execution fault: {self.state}; planner={self.planner}"
@@ -77,6 +97,32 @@ class Probe(Node):
         raise AssertionError(
             f"MPPI timeout: state={self.state}; planner={self.planner}"
         )
+
+    def collect_model_metrics(self):
+        history = []
+        for observation in self.truth.history:
+            stamp = observation.header.stamp
+            pose = observation.pose.pose
+            history.append(
+                (
+                    stamp.sec * 1_000_000_000 + stamp.nanosec,
+                    pose.position.x,
+                    pose.position.y,
+                    2 * math.atan2(pose.orientation.z, pose.orientation.w),
+                )
+            )
+        self.model_metrics.collect(history)
+
+    def report_model_metrics(self, destination):
+        self.collect_model_metrics()
+        report = self.model_metrics.summary()
+        assert (
+            report["moving_intervals"] >= 5
+        ), "Insufficient aligned physical prediction samples"
+        report["max_compute_seconds"] = self.max_compute
+        print("MODEL_METRICS: " + json.dumps(report, sort_keys=True), flush=True)
+        if destination:
+            Path(destination).write_text(json.dumps(report, indent=2) + "\n")
 
     def hold(self, duration, healthy=True):
         end = seconds(self.state.header.stamp) + duration
@@ -162,6 +208,7 @@ class Probe(Node):
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--gazebo-version", choices=("gz", "ign"), required=True)
+    parser.add_argument("--metrics", default=None)
     args = parser.parse_args()
     rclpy.init()
     node = Probe(args.gazebo_version)
@@ -210,6 +257,7 @@ def main():
         assert node.state.session_id > old_session
         assert node.state.actual_mode == retained_mode
         assert node.max_compute < 0.075
+        node.report_model_metrics(args.metrics)
         print(
             f"PASS: MPPI straight/Crab/Spin goals, physical settling, context loss and explicit recovery; max_compute={node.max_compute:.4f}s"
         )

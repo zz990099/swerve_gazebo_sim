@@ -23,3 +23,10 @@ uint8 timing_error
 uint8 safety_error
 # Simulation time at which the next new command is required.
 builtin_interfaces/Time next_execute_at
+# Diagnostic forecast of the installed, checked profile; never command authority.
+# Compare relative motion from prediction_source_pose against independent truth.
+bool has_prediction
+builtin_interfaces/Time prediction_source_stamp
+geometry_msgs/Pose2D prediction_source_pose
+builtin_interfaces/Time prediction_stamp
+geometry_msgs/Pose2D predicted_pose
