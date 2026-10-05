@@ -146,6 +146,7 @@ def main():
         )
     finally:
         node.streaming = False
+        node.report_partial_metrics(args.metrics)
         node.truth.close()
         node.destroy_node()
         rclpy.shutdown()

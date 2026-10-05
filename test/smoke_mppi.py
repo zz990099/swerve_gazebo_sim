@@ -24,6 +24,7 @@ class Probe(Node):
         )
         self.state = None
         self.model_metrics = ModelMetrics()
+        self.metrics_reported = False
         self.planner = None
         self.create_subscription(
             ChassisState, "chassis_controller/state", self.observe, 1
@@ -34,7 +35,9 @@ class Probe(Node):
         self.contexts = self.create_publisher(ChassisContext, "mppi_planner/context", 1)
         self.arm_client = self.create_client(Trigger, "mppi_planner/arm")
         self.stop_client = self.create_client(Trigger, "mppi_planner/stop")
-        self.truth = GazeboTruth("/ground_truth/odom", family)
+        # 50 Hz truth over the runner's bounded 300 s lifetime. Analysis runs
+        # only at stopped boundaries, outside the context-publication loop.
+        self.truth = GazeboTruth("/ground_truth/odom", family, history_length=16000)
         self.path = [Pose2D(), Pose2D(x=0.7)]
         self.path_id = 1
         self.obstacles = []
@@ -87,7 +90,6 @@ class Probe(Node):
         deadline = time.monotonic() + timeout
         while time.monotonic() < deadline:
             rclpy.spin_once(self, timeout_sec=0.005)
-            self.collect_model_metrics()
             if healthy and self.state and self.state.fault:
                 raise AssertionError(
                     f"Execution fault: {self.state}; planner={self.planner}"
@@ -104,15 +106,10 @@ class Probe(Node):
         observations = self.truth.history
         if not observations:
             return
-        latest = observations[-1].header.stamp
-        earliest = self.model_metrics.earliest_ready_source(
-            latest.sec * 1_000_000_000 + latest.nanosec
-        )
-        if earliest is None:
-            return
+        earliest = min(start for start, _, _, _ in self.model_metrics.pending.values())
         history = []
         # Include one sample at/before the earliest source for interpolation.
-        # Convert only completed intervals, rather than all 512 rows every spin.
+        # This runs while stopped, rather than converting truth on every spin.
         for observation in reversed(observations):
             stamp = observation.header.stamp
             stamp_ns = stamp.sec * 1_000_000_000 + stamp.nanosec
@@ -130,16 +127,27 @@ class Probe(Node):
         history.reverse()
         self.model_metrics.collect(history)
 
-    def report_model_metrics(self, destination):
+    def report_model_metrics(self, destination, require_samples=True):
         self.collect_model_metrics()
         report = self.model_metrics.summary()
-        assert (
-            report["moving_intervals"] >= 5
-        ), "Insufficient aligned physical prediction samples"
         report["max_compute_seconds"] = self.max_compute
+        report["sufficient_moving_samples"] = report["moving_intervals"] >= 5
         print("MODEL_METRICS: " + json.dumps(report, sort_keys=True), flush=True)
         if destination:
             Path(destination).write_text(json.dumps(report, indent=2) + "\n")
+        self.metrics_reported = True
+        if require_samples:
+            assert report[
+                "sufficient_moving_samples"
+            ], "Insufficient aligned physical prediction samples"
+
+    def report_partial_metrics(self, destination):
+        if not self.metrics_reported:
+            try:
+                self.report_model_metrics(destination, require_samples=False)
+            except (ValueError, RuntimeError, OSError) as error:
+                # Preserve the original physical/control failure and cleanup.
+                print(f"MODEL_METRICS_UNAVAILABLE: {error}", flush=True)
 
     def hold(self, duration, healthy=True):
         end = seconds(self.state.header.stamp) + duration
@@ -161,6 +169,7 @@ class Probe(Node):
         return future.result()
 
     def arm(self):
+        self.collect_model_metrics()
         self.streaming = True
         self.hold(0.2, healthy=False)
         for _ in range(5):
@@ -280,6 +289,7 @@ def main():
         )
     finally:
         node.streaming = False
+        node.report_partial_metrics(args.metrics)
         node.truth.close()
         node.destroy_node()
         rclpy.shutdown()

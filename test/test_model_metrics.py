@@ -62,16 +62,15 @@ class ModelMetricsTests(unittest.TestCase):
         self.assertEqual(metrics.summary()["moving_intervals"], 1)
         self.assertEqual(metrics.summary()["moving_translation_error_m"]["max"], 0.01)
 
-    def test_truth_window_waits_for_complete_intervals(self):
+    def test_retains_a_complete_physical_probe_between_stopped_boundaries(self):
         metrics = ModelMetrics()
-        self.assertIsNone(metrics.earliest_ready_source(100_000_000))
-        metrics.forecast((1, 1), 10_000_000, 110_000_000, (0, 0, 0), (0.1, 0, 0))
-        self.assertIsNone(metrics.earliest_ready_source(100_000_000))
-        self.assertEqual(metrics.earliest_ready_source(110_000_000), 10_000_000)
-        metrics.forecast((1, 2), 110_000_000, 210_000_000, (0, 0, 0), (0.1, 0, 0))
-        metrics.collect([(10_000_000, 0, 0, 0), (110_000_000, 0.1, 0, 0)])
-        self.assertIsNone(metrics.earliest_ready_source(200_000_000))
-        self.assertEqual(metrics.earliest_ready_source(210_000_000), 110_000_000)
+        for sequence in range(3000):
+            start = sequence * 100_000_000
+            metrics.forecast(
+                (1, sequence), start, start + 100_000_000, (0, 0, 0), (0.1, 0, 0)
+            )
+        self.assertEqual(metrics.summary()["pending_intervals"], 3000)
+        self.assertEqual(metrics.summary()["unmatched_intervals"], 0)
 
 
 if __name__ == "__main__":

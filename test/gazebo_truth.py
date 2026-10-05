@@ -40,10 +40,10 @@ def decode_odometry(data):
 
 
 class GazeboTruth:
-    def __init__(self, topic, family):
+    def __init__(self, topic, family, history_length=512):
         self._latest = None
         self._error = None
-        self._history = deque(maxlen=512)
+        self._history = deque(maxlen=history_length)
         self._lock = threading.Lock()
         self.process = subprocess.Popen(
             [family, "topic", "-e", "-t", topic, "--json-output"],

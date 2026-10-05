@@ -53,16 +53,11 @@ class ModelMetrics:
             self.pending.clear()
         self.last_key = key
         self.pending[key] = (source_ns, end_ns, source_pose, predicted_pose)
-        if len(self.pending) > 128:
+        # A 300 s physical probe installs at most 3000 ten-Hz intervals.
+        # Retain them until statistics run at a stopped boundary.
+        if len(self.pending) > 4096:
             self.pending.pop(next(iter(self.pending)))
             self.unmatched += 1
-
-    def earliest_ready_source(self, latest_ns):
-        """Return the truth window needed now, avoiding work on incomplete intervals."""
-        return min(
-            (start for start, end, _, _ in self.pending.values() if end <= latest_ns),
-            default=None,
-        )
 
     def collect(self, history):
         if not history:

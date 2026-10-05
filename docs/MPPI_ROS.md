@@ -26,6 +26,10 @@ These fields do not authorize execution, renew a source timestamp or replace
 measured feedback. Rebuild all consumers after this message change.
 
 Both physical MPPI probes now export `model-metrics.json` in their log directory.
+Truth and forecasts are buffered during motion; statistics run at stopped
+boundaries before rearming and at the final report, outside context publication.
+Failed probes also write available partial statistics without suppressing the
+original failure; sample sufficiency is explicit in the report.
 They compare one-interval model motion with independent Gazebo truth in each
 observation's own starting body frame, avoiding accumulated encoder/world frame
 offsets. Truth is interpolated only between observations no more than 40 ms apart,
