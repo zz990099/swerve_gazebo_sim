@@ -48,8 +48,44 @@ struct Fixture {
     wall += .1;
   }
 };
+void test_jittered_snapshot_admission() {
+  Fixture f;
+  auto arm = f.packet(f.command(core::DriveMode::DualAckermann), true);
+  f.runtime.update_snapshot(1, 10, {}, f.context, &arm);
+  auto command = f.packet(f.command(core::DriveMode::DualAckermann));
+  command.envelope.source_stamp_s = 1.02;
+  command.envelope.issued_at_s = 1.02;
+  command.envelope.execute_at_s = 1.1;
+  command.envelope.valid_until_s = 1.125;
+  command.wall_s = 10.02;
+  for (int step = 1; step <= 10; ++step) {
+    const double now = 1 + step * .01;
+    f.context.stamp_s = now - .02; // Genuine bounded observation delay.
+    f.runtime.update_snapshot(now, 10 + step * .01, {}, f.context,
+                              step >= 4 ? &command : nullptr);
+    require(!f.runtime.fault(), "bounded queue jitter must preserve admission");
+  }
+  require(std::abs(f.runtime.context_age() - .02) < 1e-9 &&
+              std::abs(f.runtime.command_source_age() - .08) < 1e-9 &&
+              std::abs(f.runtime.command_receipt_age() - .08) < 1e-9 &&
+              std::abs(f.runtime.command_schedule_slack() - .06) < 1e-9,
+          "diagnostics must retain source, receipt and application clocks");
+  auto late = command;
+  late.receipt += 1;
+  late.envelope.sequence += 1;
+  late.envelope.source_stamp_s = 1.11;
+  late.envelope.issued_at_s = 1.11;
+  late.envelope.execute_at_s = 1.2;
+  late.envelope.valid_until_s = 1.225;
+  late.wall_s = 10.11;
+  f.context.stamp_s = .9;
+  f.runtime.update_snapshot(1.11, 10.11, {}, f.context, &late);
+  require(f.runtime.fault() && f.runtime.rejection_detail() == 3,
+          "fresh packets must not hide stale independent context");
+}
 int main() {
   try {
+    test_jittered_snapshot_admission();
     Fixture epsilon;
     epsilon.joints.wheels.fill(1e-6);
     epsilon.tick(epsilon.command(core::DriveMode::DualAckermann), true);

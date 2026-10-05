@@ -4,6 +4,52 @@ import bisect
 import math
 
 
+def statistics(values):
+    if not values:
+        return {"rms": None, "p95": None, "max": None}
+    ordered = sorted(values)
+    return {
+        "rms": math.sqrt(sum(v * v for v in values) / len(values)),
+        "p95": ordered[math.ceil(0.95 * len(values)) - 1],
+        "max": ordered[-1],
+    }
+
+
+def acceptance(report, required_modes):
+    """Regression envelope for the bundled Gazebo plant, not hardware limits."""
+    errors = []
+    if report["moving_intervals"] < 20:
+        errors.append("fewer than 20 moving intervals")
+    total = (
+        report["matched_intervals"]
+        + report["unmatched_intervals"]
+        + report["missed_intervals"]
+    )
+    coverage = report["matched_intervals"] / total if total else 0
+    if coverage < 0.9:
+        errors.append("less than 90% completed-interval truth coverage")
+    groups = {"all": report, **report["motion_groups"]}
+    for name in [*(f"mode_{mode}" for mode in required_modes), "braking"]:
+        if groups.get(name, {}).get("moving_intervals", 0) < 5:
+            errors.append(f"insufficient motion coverage: {name}")
+    for name, group in groups.items():
+        for field, p95_limit, max_limit in (
+            ("moving_translation_error_m", 0.005, 0.01),
+            ("moving_yaw_error_rad", 0.015, 0.025),
+        ):
+            stats = group[field]
+            if group["moving_intervals"] and (
+                not all(
+                    stats[key] is not None and math.isfinite(stats[key])
+                    for key in ("p95", "max")
+                )
+                or stats["p95"] > p95_limit
+                or stats["max"] > max_limit
+            ):
+                errors.append(f"model error envelope exceeded: {name}/{field}")
+    return {"passed": not errors, "matched_fraction": coverage, "errors": errors}
+
+
 def angle(value):
     return math.atan2(math.sin(value), math.cos(value))
 
@@ -41,19 +87,39 @@ class ModelMetrics:
         self.moving = []
         self.unmatched = 0
         self.interrupted = 0
+        self.missed = 0
+        self.groups = {}
 
-    def forecast(self, key, source_ns, end_ns, source_pose, predicted_pose):
+    def forecast(
+        self,
+        key,
+        source_ns,
+        end_ns,
+        source_pose,
+        predicted_pose,
+        mode=None,
+        braking=False,
+    ):
         if self.last_key is not None and key <= self.last_key:
             return
         if not 0 < end_ns - source_ns <= 150_000_000:
             raise ValueError("invalid installed prediction interval")
         if not all(math.isfinite(v) for v in (*source_pose, *predicted_pose)):
             raise ValueError("nonfinite installed prediction")
+        if self.last_key is not None and key[0] == self.last_key[0]:
+            self.missed += max(0, key[1] - self.last_key[1] - 1)
         if self.last_key is not None and key[0] != self.last_key[0]:
             self.unmatched += len(self.pending)
             self.pending.clear()
         self.last_key = key
-        self.pending[key] = (source_ns, end_ns, source_pose, predicted_pose)
+        self.pending[key] = (
+            source_ns,
+            end_ns,
+            source_pose,
+            predicted_pose,
+            mode,
+            braking,
+        )
         # A 300 s physical probe installs at most 3000 ten-Hz intervals.
         # Retain them until statistics run at a stopped boundary.
         if len(self.pending) > 4096:
@@ -62,7 +128,7 @@ class ModelMetrics:
 
     def interrupt(self, session, stamp_ns):
         """A latched stop truncates a profile; it is not model error over its full span."""
-        for key, (start, end, _, _) in list(self.pending.items()):
+        for key, (start, end, *_) in list(self.pending.items()):
             if key[0] == session and start <= stamp_ns < end:
                 del self.pending[key]
                 self.interrupted += 1
@@ -70,7 +136,9 @@ class ModelMetrics:
     def collect(self, history):
         if not history:
             return
-        for key, (start_ns, end_ns, source, predicted) in list(self.pending.items()):
+        for key, (start_ns, end_ns, source, predicted, mode, braking) in list(
+            self.pending.items()
+        ):
             if history[-1][0] < end_ns:
                 continue
             start, end = interpolate(history, start_ns), interpolate(history, end_ns)
@@ -93,22 +161,25 @@ class ModelMetrics:
                 or abs(actual[2]) > 0.001
             ):
                 self.moving.append(error)
+                for group in ([f"mode_{mode}"] if mode is not None else []) + (
+                    ["braking"] if braking else []
+                ):
+                    self.groups.setdefault(group, []).append(error)
 
     def summary(self):
-        def statistics(values):
-            if not values:
-                return {"rms": None, "p95": None, "max": None}
-            ordered = sorted(values)
-            return {
-                "rms": math.sqrt(sum(v * v for v in values) / len(values)),
-                "p95": ordered[math.ceil(0.95 * len(values)) - 1],
-                "max": ordered[-1],
-            }
-
         return {
+            "motion_groups": {
+                name: {
+                    "moving_intervals": len(errors),
+                    "moving_translation_error_m": statistics([e[0] for e in errors]),
+                    "moving_yaw_error_rad": statistics([e[1] for e in errors]),
+                }
+                for name, errors in self.groups.items()
+            },
             "matched_intervals": len(self.errors),
             "moving_intervals": len(self.moving),
             "unmatched_intervals": self.unmatched,
+            "missed_intervals": self.missed,
             "interrupted_intervals": self.interrupted,
             "pending_intervals": len(self.pending),
             "moving_translation_error_m": statistics([e[0] for e in self.moving]),

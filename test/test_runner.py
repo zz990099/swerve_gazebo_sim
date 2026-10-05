@@ -9,6 +9,7 @@ from pathlib import Path
 
 import psutil
 import pytest
+import yaml
 from obstacle_fixture import OBSTACLES, clearance, corridor_world
 
 RUNNER = Path(__file__).with_name("run_simulation.py")
@@ -44,6 +45,16 @@ def test_clearance_detects_crossing_even_with_clear_endpoints():
     assert clearance(left, left) > 0
     assert clearance(right, right) > 0
     assert clearance(left, right) < 0
+
+
+def test_payload_variant_changes_only_physical_mass(tmp_path):
+    assert runner.plant_configuration(tmp_path, "nominal") is None
+    source = yaml.safe_load((RUNNER.parents[1] / "config" / "swerve.yaml").read_text())
+    path = runner.plant_configuration(tmp_path, "payload")
+    changed = yaml.safe_load(path.read_text())
+    assert changed["geometry"]["body_mass"] == source["geometry"]["body_mass"] * 1.25
+    changed["geometry"]["body_mass"] = source["geometry"]["body_mass"]
+    assert changed == source
 
 
 def test_each_run_has_an_independent_transport_partition():

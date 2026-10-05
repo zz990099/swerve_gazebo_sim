@@ -11,6 +11,7 @@ import uuid
 from pathlib import Path
 
 import psutil
+import yaml
 from obstacle_fixture import corridor_world
 
 
@@ -60,6 +61,20 @@ def stop_descendants(tracked):
             pass
 
 
+def plant_configuration(directory, variant):
+    """Bounded plant-only mass perturbation; controller limits stay unchanged."""
+    if variant == "nominal":
+        return None
+    if variant != "payload":
+        raise ValueError("unknown plant variant")
+    source = Path(__file__).resolve().parents[1] / "config" / "swerve.yaml"
+    config = yaml.safe_load(source.read_text())
+    config["geometry"]["body_mass"] *= 1.25
+    destination = directory / "payload.yaml"
+    destination.write_text(yaml.safe_dump(config))
+    return destination.resolve()
+
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--multi", action="store_true")
@@ -73,6 +88,9 @@ def main():
         default="ign",
     )
     parser.add_argument("--logs", default=None)
+    parser.add_argument(
+        "--plant-variant", choices=("nominal", "payload"), default="nominal"
+    )
     args = parser.parse_args()
     if args.mppi_paths:
         args.mppi = True
@@ -84,6 +102,7 @@ def main():
         parser.error("--external currently validates one protected endpoint")
     directory = Path(args.logs or tempfile.mkdtemp(prefix="swerve_validation_"))
     directory.mkdir(parents=True, exist_ok=True)
+    configuration = plant_configuration(directory, args.plant_variant)
     processes = []
     streams = []
     descendants = {}
@@ -111,6 +130,8 @@ def main():
             "headless:=true",
             "publish_ground_truth:=true",
         ]
+        if configuration is not None:
+            command += [f"config:={configuration}"]
         if args.mppi:
             command += [f"gazebo_version:={args.gazebo_version}"]
         if args.mppi_paths:

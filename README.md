@@ -1,3 +1,13 @@
+## Physical acceptance and timing diagnostics (0.6)
+
+Model statistics now enforce a nominal Gazebo regression envelope, completed-truth
+coverage and per-mode/braking moving samples. CI repeats MPPI and explicit-chassis
+probes and adds 25% body payload with unchanged control limits. State messages
+report source/receipt/context ages and schedule margins. Synthetic contexts keep
+the actual observation stamp and publish immediately on fresh feedback. The joint
+owner reuses immutable buffer snapshots instead of copying tasks every high-rate
+tick. See [MPPI_ROS.md](docs/MPPI_ROS.md) for limits and remaining calibration work.
+
 ## MPPI ROS planning and explicit control (0.4)
 
 The optional `mppi_planner` node connects the standalone MPPI core to the explicit
@@ -9,7 +19,7 @@ requires explicit stopped arming/recovery. See [MPPI_ROS.md](docs/MPPI_ROS.md).
 
 Optional `chassis_control:=true` receives typed body velocity and explicit mode
 requests, with measured confirmation and persistent mode on zero velocity.
-Build with `SWERVE_BUILD_CHASSIS_CONTROLLER=ON` and installed MPPI core 0.20.2.
+Build with `SWERVE_BUILD_CHASSIS_CONTROLLER=ON` and installed MPPI core 0.21.0.
 See [CHASSIS_INTERFACE.md](docs/CHASSIS_INTERFACE.md) for build, topics, timing,
 startup and recovery. Existing Twist and external-joint modes remain available
 as mutually exclusive alternatives.

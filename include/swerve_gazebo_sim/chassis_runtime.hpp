@@ -51,10 +51,21 @@ public:
   core::TimingError timing_error() const { return timing_error_; }
   core::ExecutionSafetyError safety_error() const { return safety_error_; }
   unsigned rejection_detail() const { return rejection_detail_; }
+  double context_age() const { return context_age_s_; }
+  double command_receipt_age() const { return command_receipt_age_s_; }
+  double command_source_age() const { return command_source_age_s_; }
+  double command_schedule_slack() const { return command_schedule_slack_s_; }
   EndpointTargets
   update(double now, double wall, const EndpointTargets &joints,
          const ChassisContext &context,
          const std::optional<ChassisPacket> &packet = std::nullopt) {
+    return update_snapshot(now, wall, joints, context, packet ? &*packet : nullptr);
+  }
+  // Immutable buffer snapshots avoid copying a full task at each hardware tick.
+  EndpointTargets update_snapshot(double now, double wall, const EndpointTargets &joints,
+                                  const ChassisContext &context,
+                                  const ChassisPacket *packet = nullptr) {
+    context_age_s_ = context.valid && std::isfinite(context.stamp_s) ? now - context.stamp_s : -1;
     const bool clock = std::isfinite(now) && now >= 0 && std::isfinite(wall) &&
                        wall >= 0 && (last_now_ < 0 || now >= last_now_) &&
                        (last_wall_ < 0 || wall >= last_wall_);
@@ -98,6 +109,7 @@ public:
     bool new_arm = false;
     if (packet && packet->receipt != receipt_) {
       receipt_ = packet->receipt;
+      command_schedule_slack_s_ = packet->envelope.execute_at_s - now;
       const auto &p = *packet;
       if (!clock || !valid || p.malformed || !std::isfinite(p.wall_s) ||
           p.wall_s > wall || wall - p.wall_s >= .15 ||
@@ -136,6 +148,8 @@ public:
           wall - pending_->wall_s >= .15) {
         stop(EndpointFault::SimulationDeadline);
       } else {
+        command_receipt_age_s_ = wall - pending_->wall_s;
+        command_source_age_s_ = now - pending_->envelope.source_stamp_s;
         auto latest = context.input;
         latest.vehicle = state_;
         auto result = executor_->update(pending_->envelope, latest, now);
@@ -263,6 +277,8 @@ private:
     (void)wall;
     return true;
   }
+  double context_age_s_ = -1, command_receipt_age_s_ = -1,
+         command_source_age_s_ = -1, command_schedule_slack_s_ = -1;
   core::Config config_;
   core::Kinematics kinematics_;
   core::ProfileRunner runner_;

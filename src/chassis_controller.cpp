@@ -226,11 +226,11 @@ public:
     }
     try {
       const auto targets =
-          runtime_->update(simulation_time(), wall_now(), measured(),
-                           context ? *context : ChassisContext{},
+          runtime_->update_snapshot(simulation_time(), wall_now(), measured(),
+                           context ? *context : empty_context_,
                            packet && packet->receipt > activation_receipt_
-                               ? std::optional<ChassisPacket>(*packet)
-                               : std::nullopt);
+                               ? packet.get()
+                               : nullptr);
       if (!write(targets)) {
         runtime_->stop(EndpointFault::WriteFailure);
         write(runtime_->update(simulation_time(), wall_now(), measured(), {}));
@@ -306,6 +306,7 @@ private:
   std::size_t clock_index_ = 0;
   std::array<std::size_t, 8> command_index_{}, state_index_{};
   std::unique_ptr<ChassisRuntime> runtime_;
+  const ChassisContext empty_context_;
   std::string body_frame_, odom_frame_;
   realtime_tools::RealtimeBuffer<std::shared_ptr<const ChassisPacket>> buffer_;
   realtime_tools::RealtimeBuffer<std::shared_ptr<const ChassisContext>>

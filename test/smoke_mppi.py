@@ -4,12 +4,13 @@ import argparse
 import json
 import math
 import time
+from collections import deque
 from pathlib import Path
 
 import rclpy
 from gazebo_truth import GazeboTruth
 from geometry_msgs.msg import Pose2D
-from model_metrics import ModelMetrics
+from model_metrics import ModelMetrics, acceptance, statistics
 from rclpy.node import Node
 from rclpy.parameter import Parameter
 from smoke_chassis import seconds
@@ -25,6 +26,18 @@ class Probe(Node):
         self.state = None
         self.model_metrics = ModelMetrics()
         self.metrics_reported = False
+        self.required_modes = (0, 1, 2)
+        self.timing_samples = {
+            name: deque(maxlen=30000)
+            for name in (
+                "context_age_seconds",
+                "command_receipt_age_seconds",
+                "command_source_age_seconds",
+                "command_schedule_slack_seconds",
+                "planning_context_age_seconds",
+                "schedule_margin_seconds",
+            )
+        }
         self.planner = None
         self.create_subscription(
             ChassisState, "chassis_controller/state", self.observe, 1
@@ -45,10 +58,22 @@ class Probe(Node):
         self.streaming = True
         self.max_compute = 0
         self.driving_modes = set()
-        self.create_timer(0.02, self.publish_context)
+        # Publish immediately from each new observation; a separate timer can
+        # add avoidable callback-queue delay while reusing an older source stamp.
 
     def observe(self, state):
         self.state = state
+        self.publish_context()
+        if not state.fault:
+            for name in (
+                "context_age_seconds",
+                "command_receipt_age_seconds",
+                "command_source_age_seconds",
+                "command_schedule_slack_seconds",
+            ):
+                value = getattr(state, name)
+                if value >= 0 and math.isfinite(value):
+                    self.timing_samples[name].append(value)
         if state.fault:
             self.model_metrics.interrupt(
                 state.session_id,
@@ -68,6 +93,17 @@ class Probe(Node):
                 ns(state.prediction_stamp),
                 pose(state.prediction_source_pose),
                 pose(state.predicted_pose),
+                mode=state.actual_mode,
+                braking=(
+                    math.hypot(state.predicted_velocity.x, state.predicted_velocity.y)
+                    < math.hypot(
+                        state.prediction_source_velocity.x,
+                        state.prediction_source_velocity.y,
+                    )
+                    - 0.001
+                    or abs(state.predicted_velocity.z)
+                    < abs(state.prediction_source_velocity.z) - 0.001
+                ),
             )
         if not state.fault and (
             math.hypot(state.velocity.x, state.velocity.y) > 0.03
@@ -77,6 +113,11 @@ class Probe(Node):
 
     def observe_planner(self, state):
         self.planner = state
+        if state.authorized:
+            for name in ("planning_context_age_seconds", "schedule_margin_seconds"):
+                value = getattr(state, name)
+                if value >= 0 and math.isfinite(value):
+                    self.timing_samples[name].append(value)
         self.max_compute = max(self.max_compute, state.compute_seconds)
 
     def publish_context(self):
@@ -111,7 +152,7 @@ class Probe(Node):
         observations = self.truth.history
         if not observations:
             return
-        earliest = min(start for start, _, _, _ in self.model_metrics.pending.values())
+        earliest = min(forecast[0] for forecast in self.model_metrics.pending.values())
         history = []
         # Include one sample at/before the earliest source for interpolation.
         # This runs while stopped, rather than converting truth on every spin.
@@ -136,15 +177,22 @@ class Probe(Node):
         self.collect_model_metrics()
         report = self.model_metrics.summary()
         report["max_compute_seconds"] = self.max_compute
-        report["sufficient_moving_samples"] = report["moving_intervals"] >= 5
+        report["sufficient_moving_samples"] = report["moving_intervals"] >= 20
+        report["acceptance"] = acceptance(report, self.required_modes)
+        report["timing"] = {
+            name: {
+                "samples": len(values),
+                "min": min(values) if values else None,
+                **statistics(values),
+            }
+            for name, values in self.timing_samples.items()
+        }
         print("MODEL_METRICS: " + json.dumps(report, sort_keys=True), flush=True)
         if destination:
             Path(destination).write_text(json.dumps(report, indent=2) + "\n")
         self.metrics_reported = True
         if require_samples:
-            assert report[
-                "sufficient_moving_samples"
-            ], "Insufficient aligned physical prediction samples"
+            assert report["acceptance"]["passed"], report["acceptance"]["errors"]
 
     def report_partial_metrics(self, destination):
         if not self.metrics_reported:

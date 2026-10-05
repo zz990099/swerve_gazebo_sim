@@ -30,3 +30,12 @@ builtin_interfaces/Time prediction_source_stamp
 geometry_msgs/Pose2D prediction_source_pose
 builtin_interfaces/Time prediction_stamp
 geometry_msgs/Pose2D predicted_pose
+
+# Diagnostics only; source/receipt ages are measured at application; slack at receipt.
+# Context age uses simulation time; receipt age uses steady wall time.
+float64 context_age_seconds
+float64 command_receipt_age_seconds
+float64 command_source_age_seconds
+float64 command_schedule_slack_seconds
+geometry_msgs/Vector3 prediction_source_velocity
+geometry_msgs/Vector3 predicted_velocity

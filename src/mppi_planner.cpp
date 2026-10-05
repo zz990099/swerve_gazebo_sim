@@ -103,6 +103,7 @@ public:
             cancel();
             return;
           }
+          planning_context_age_s_ = feedback_.vehicle.stamp_s - context.stamp_s;
           const double start = wall();
           auto packet = bridge_->plan(feedback_, context);
           const double elapsed = wall() - start;
@@ -111,6 +112,7 @@ public:
             auto &e = packet->envelope;
             planned_path_id_ = e.source_task->path_id;
             e.issued_at_s = std::max(e.source_stamp_s, now().seconds());
+            schedule_margin_s_ = e.execute_at_s - e.issued_at_s;
             bool changed;
             {
               std::lock_guard<std::mutex> lock(input_mutex_);
@@ -255,10 +257,14 @@ private:
     m.goal_distance = o.goal_distance_m;
     m.goal_yaw_error = o.goal_yaw_error_rad;
     m.compute_seconds = compute_s_;
+    m.feedback_age_seconds = now().seconds() - feedback_.vehicle.stamp_s;
+    m.planning_context_age_seconds = planning_context_age_s_;
+    m.schedule_margin_seconds = schedule_margin_s_;
     m.evaluated_rollouts = o.planning_stats.evaluated_rollouts;
     m.budget_exhausted = o.planning_stats.budget_exhausted;
     status_->publish(m);
   }
+  double planning_context_age_s_ = -1, schedule_margin_s_ = -1;
   std::string body_, odom_;
   std::unique_ptr<PlannerBridge> bridge_;
   PlannerFeedback feedback_;

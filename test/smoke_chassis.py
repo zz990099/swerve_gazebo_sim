@@ -50,6 +50,10 @@ class Probe(Node):
 
     def observe(self, state):
         self.state = state
+        if self.streaming:
+            # Keep the actual observation stamp; publish without waiting behind
+            # the command timer. Loss of feedback cannot manufacture freshness.
+            self.publish_context(seconds(state.header.stamp))
 
     def publish_context(self, now):
         msg = ChassisContext()
@@ -85,7 +89,6 @@ class Probe(Node):
             self.get_clock().now().nanoseconds * 1e-9,
             seconds(self.state.header.stamp),
         )
-        self.publish_context(now)
         if self.state.fault:
             return
         boundary = seconds(self.state.next_execute_at)

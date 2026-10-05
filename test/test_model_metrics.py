@@ -3,10 +3,51 @@
 import math
 import unittest
 
-from model_metrics import ModelMetrics, interpolate
+from model_metrics import ModelMetrics, acceptance, interpolate
 
 
 class ModelMetricsTests(unittest.TestCase):
+    def accepted_report(self, translation_error=0):
+        metrics = ModelMetrics()
+        history = []
+        for sequence in range(31):
+            stamp = sequence * 100_000_000
+            history.append((stamp, sequence * 0.02, 0, 0))
+            if sequence < 30:
+                metrics.forecast(
+                    (1, sequence),
+                    stamp,
+                    stamp + 100_000_000,
+                    (0, 0, 0),
+                    (0.02 + translation_error, 0, 0),
+                    mode=sequence % 3,
+                    braking=sequence % 6 == 0,
+                )
+        metrics.collect(history)
+        return metrics.summary()
+
+    def test_acceptance_requires_error_and_motion_coverage(self):
+        report = self.accepted_report()
+        self.assertTrue(acceptance(report, (0, 1, 2))["passed"])
+        self.assertFalse(acceptance(self.accepted_report(0.02), (0, 1, 2))["passed"])
+        del report["motion_groups"]["mode_2"]
+        self.assertFalse(acceptance(report, (0, 1, 2))["passed"])
+        report = self.accepted_report()
+        report["unmatched_intervals"] = 10
+        self.assertFalse(acceptance(report, (0, 1, 2))["passed"])
+        report = self.accepted_report()
+        report["motion_groups"]["braking"]["moving_yaw_error_rad"]["max"] = math.nan
+        self.assertFalse(acceptance(report, (0, 1, 2))["passed"])
+
+    def test_dropped_prediction_receipts_count_against_coverage(self):
+        metrics = ModelMetrics()
+        metrics.forecast((1, 1), 0, 100_000_000, (0, 0, 0), (0.1, 0, 0))
+        metrics.forecast((1, 4), 300_000_000, 400_000_000, (0, 0, 0), (0.1, 0, 0))
+        self.assertEqual(metrics.summary()["missed_intervals"], 2)
+        report = self.accepted_report()
+        report["missed_intervals"] = 4
+        self.assertFalse(acceptance(report, (0, 1, 2))["passed"])
+
     def test_exact_timestamps_gap_and_no_extrapolation(self):
         history = [(0, 0, 0, 0), (20_000_000, 0.02, 0, 0)]
         self.assertEqual(interpolate(history, 0), (0, 0, 0))

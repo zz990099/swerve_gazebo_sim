@@ -39,7 +39,8 @@ the truncated installed interval and counts it separately as interrupted;
 an intentionally cancelled profile is not treated as full-interval model error.
 At least five moving
 intervals must be observed; missing matches cannot masquerade as zero error.
-The probe reports error rather than inventing a calibrated safety tolerance.
+The probe enforces a bundled-plant regression envelope, not a calibrated hardware
+safety tolerance. See the 0.6 acceptance section below.
 Measure braking, turning and mode transitions under intended mass, friction and
 servo settings before selecting uncertainty margins or claiming model agreement.
 
@@ -179,3 +180,47 @@ These are bounded deterministic scenarios. They do not certify
 obstacle perception, arbitrary paths, physical collision/braking margins or slip
 robustness. Planning and feedback use encoder odometry. External localization,
 Nav2 actions and TF conversion are subsequent integration work.
+
+## 0.6 acceptance and diagnostics
+
+Requires core 0.21.0. Healthy ChassisState includes context simulation age, command
+source/adapter-receipt ages at application and schedule slack at receipt.
+PlannerState includes feedback age, selected context age and post-compute schedule
+margin. -1 indicates unavailable diagnostics. These fields never renew timestamps
+or authorize motion. A receipt age excludes DDS delay before the adapter callback;
+source age includes the observation-to-application interval.
+
+The physical probes publish their synthetic static task/circles immediately on
+each observed ChassisState, preserving its exact source stamp. They do not analyze
+truth inside this publication loop. Real perception must retain its own original
+measurement stamp; publishing a cached obstacle list with a new stamp is invalid.
+
+Each probe must have at least 20 moving intervals; at least five for each required
+mode and braking. Straight/Crab/Spin probes require modes 0/1/2, corridor probes
+0/1. At least 90% of completed predictions must match bounded independent truth;
+missing installed-profile sequence numbers count against coverage.
+Explicitly interrupted intervals are reported separately; end-of-probe pending
+intervals remain visible. Global and each covered group's moving error must meet:
+
+| Metric | P95 limit | Maximum limit |
+| --- | --- | --- |
+| One-profile relative translation | 0.005 m | 0.010 m |
+| One-profile relative yaw | 0.015 rad | 0.025 rad |
+
+These regression limits deliberately exceed the recorded nominal 0.5.0 maxima
+(about 2.3 mm and 0.010 rad) while detecting material model degradation. They do
+not certify slip uncertainty, sensor accuracy or collision margins. Full-path
+truth goal position/yaw gates and physical corridor clearance remain separate.
+Installed forecasts also carry source/end velocity to classify braking; group
+coverage prevents stationary holds from diluting motion error.
+
+Both ROS/Gazebo CI families run three independently isolated nominal MPPI probes,
+three explicit-chassis probes, and a 25% body-mass payload MPPI probe. The payload
+changes only the plant's mass/inertia, not controller limits. No failed physical
+run is retried inside the test script. Runtime regressions inject queue/observation
+delay, preserve source stamps and ensure fresh packets cannot hide stale context.
+
+Tire-friction/slip, servo-lag and larger plant changes still need identification
+and separate scenario acceptance; this bounded payload test does not cover them.
+The target CPU must pass the core's 60 ms strict workload gates under expected
+load, and repeated ROS runs must retain schedule headroom and fresh context.

@@ -131,6 +131,10 @@ inline msg::ChassisState encode(const ChassisRuntime &r,
   m.timing_error = static_cast<std::uint8_t>(r.timing_error());
   m.safety_error = static_cast<std::uint8_t>(r.safety_error());
   m.next_execute_at = stamp(r.next_tick());
+  m.context_age_seconds = r.context_age();
+  m.command_receipt_age_seconds = r.command_receipt_age();
+  m.command_source_age_seconds = r.command_source_age();
+  m.command_schedule_slack_seconds = r.command_schedule_slack();
   m.has_prediction = !r.fault() && r.prediction().has_value();
   if (m.has_prediction) {
     const auto &start = r.prediction_start();
@@ -140,6 +144,8 @@ inline msg::ChassisState encode(const ChassisRuntime &r,
     m.prediction_source_pose.y = start.pose.y;
     m.prediction_source_pose.theta = start.pose.yaw;
     m.prediction_stamp = stamp(end.stamp_s);
+    m.prediction_source_velocity = vector(start.velocity);
+    m.predicted_velocity = vector(end.velocity);
     m.predicted_pose.x = end.pose.x;
     m.predicted_pose.y = end.pose.y;
     m.predicted_pose.theta = end.pose.yaw;

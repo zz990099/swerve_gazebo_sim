@@ -14,6 +14,7 @@ from swerve_gazebo_sim.msg import CircleObstacle
 class PathProbe(Probe):
     def __init__(self, family):
         super().__init__(family)
+        self.required_modes = (0, 1)
         self.obstacles = [CircleObstacle(x=x, y=y, radius=r) for x, y, r in OBSTACLES]
         self.previous_truth = None
         self.min_clearance = math.inf

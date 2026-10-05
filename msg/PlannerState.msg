@@ -18,3 +18,9 @@ float64 goal_yaw_error
 float64 compute_seconds
 uint64 evaluated_rollouts
 bool budget_exhausted
+
+# Latest observed simulation age; -1 before a compatible planning context.
+float64 feedback_age_seconds
+float64 planning_context_age_seconds
+# Simulation-time margin between post-solve issue and scheduled application.
+float64 schedule_margin_seconds
