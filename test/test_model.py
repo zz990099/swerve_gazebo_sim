@@ -208,12 +208,15 @@ def test_namespace_and_controller_joint_alignment():
         ns,
         prefix,
     )
-    assert (
-        cfg["/fleet/robot1/gz_ros2_control"]["ros__parameters"][
-            "position_proportional_gain"
-        ]
-        == 1.0
-    )
+    assert set(cfg) == {
+        ns + "/" + name
+        for name in (
+            "controller_manager",
+            "joint_state_broadcaster",
+            "steering_controller",
+            "wheel_controller",
+        )
+    }
     assert (
         cfg["/fleet/robot1/wheel_controller"]["ros__parameters"]["joints"][0]
         == "fleet_robot1_fl_wheel_joint"

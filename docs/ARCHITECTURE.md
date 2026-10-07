@@ -8,8 +8,8 @@ inverse/forward kinematics and pose integration without NumPy.
 
 Gazebo loads the official `gz_ros2_control/GazeboSimSystem` hardware. Standard
 forward command controllers expose steering position and wheel velocity, while
-`joint_state_broadcaster` reports encoders. Steering servo gain is configured
-through the official plugin's `position_proportional_gain` parameter. No custom
+`joint_state_broadcaster` reports encoders. The official plugin supplies its
+default steering servo; no per-version servo configuration is needed. No custom
 hardware wrapper, controller plugin, physics-clock plugin or lifecycle protocol
 is built here. ROS interface generation still uses the usual rosidl toolchain.
 

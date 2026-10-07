@@ -199,6 +199,4 @@ def controller_config(template, cfg, namespace, prefix):
                 ],
             }
         }
-    # Configure the upstream simulator servo directly; no hardware wrapper is needed.
-    data["gz_ros2_control"] = {"ros__parameters": {"position_proportional_gain": 1.0}}
     return {f"{namespace}/{key}": value for key, value in data.items()}
