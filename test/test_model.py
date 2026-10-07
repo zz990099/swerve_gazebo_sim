@@ -43,6 +43,9 @@ def test_geometry_has_eight_actuated_joints_and_consistent_dimensions(tmp_path):
     assert len(joints) == 8
     for corner, sx, sy in [("fl", 1, 1), ("fr", 1, -1), ("rl", -1, 1), ("rr", -1, -1)]:
         j = root.find(f"joint[@name='test_{corner}_steering_joint']")
+        limit = cfg["control"]["steering_limit"]
+        assert float(j.find("limit").get("lower")) == pytest.approx(-limit - 0.02)
+        assert float(j.find("limit").get("upper")) == pytest.approx(limit + 0.02)
         xyz = [float(v) for v in j.find("origin").get("xyz").split()]
         assert xyz[:2] == pytest.approx(
             [

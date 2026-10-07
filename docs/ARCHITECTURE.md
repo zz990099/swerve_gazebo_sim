@@ -16,7 +16,13 @@ and integrates pose. It neither subscribes to velocity commands nor writes joint
 No ground truth enters chassis control or odometry. An optional Gazebo truth
 publisher exists only for independent physical acceptance.
 
-URDF/Xacro defines mass, inertia, geometry, contact and joint limits. Launch
+URDF/Xacro defines mass, inertia, geometry, contact and joint limits. Software
+steering travel is +/-pi/2. The physics hard stops are 0.02 rad beyond each
+operating endpoint, avoiding the known Fortress/DART hard-stop lock
+([upstream issue](https://github.com/ros-controls/gz_ros2_control/issues/165)).
+This plant margin does not expand admitted steering commands or relax mode
+confirmation. A hardware model with hard stops exactly at +/-pi/2 needs its own
+validated actuator model. Launch
 builds one strict controller configuration, spawns the robot, activates the joint
 state broadcaster and chassis plugin, and starts the observer. The generic bridge
 configuration defaults to clock transport and can be replaced for external sensors.

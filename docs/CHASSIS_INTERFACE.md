@@ -65,7 +65,8 @@ cause an automatic brake/alignment interval; they do not select a different mode
 
 A zero velocity retains mode and steering while decelerating. It is not a mode
 request and does not imply forward alignment. Signed wheel velocities and
-steering bounded to +/- pi/2 implement reverse directions.
+steering commands bounded to +/- pi/2 implement reverse directions. The plant
+hard stops include a 0.02 rad margin beyond this operating range; see architecture.
 
 ## Feedback and limits
 

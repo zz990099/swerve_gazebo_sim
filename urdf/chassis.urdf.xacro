@@ -86,9 +86,12 @@
         <child link="${prefix}${name}_steering_link" />
         <origin xyz="${x} ${y} ${wheel_radius - base_z}" />
         <axis xyz="0 0 1" />
+        <!-- Keep operating endpoints inside the physics hard stops. Fortress's
+             DART solver can lock a velocity-driven joint exactly at a hard stop
+             (ros-controls/gz_ros2_control#165). Command travel remains +/-pi/2. -->
         <limit
-          lower="${-steering_limit}"
-          upper="${steering_limit}"
+          lower="${-steering_limit - 0.02}"
+          upper="${steering_limit + 0.02}"
           effort="30"
           velocity="${max_steering_rate}"
         />

@@ -34,7 +34,8 @@ control:
   # Drive joint angular limits: rad/s and rad/s^2. Normal braking uses this ramp.
   max_wheel_speed: 20.0
   max_wheel_acceleration: 40.0
-  # Steering command slew (rad/s) and mechanical travel (+/-rad).
+  # Steering command slew (rad/s) and operating travel (+/-rad).
+  # URDF hard stops include 0.02 rad extra travel to avoid solver limit locking.
   max_steering_rate: 2.5
   steering_limit: 1.5707963267948966
   # Body target limits (m/s, rad/s) and target slew (m/s^2, rad/s^2).
