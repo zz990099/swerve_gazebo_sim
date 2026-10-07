@@ -54,12 +54,9 @@ public:
       return false;
     model_ = parent->Data();
     ecm_ = &ecm;
-    // The default 0.1 gain adds about ten control ticks of steering lag while
-    // wheels track velocity immediately. Affine MPPI joint profiles require
-    // the position servo to follow each sampled target on the same time scale.
-    // Both upstream versions convert position error to velocity using gain *
-    // controller update_rate. At 200 Hz physics / 100 Hz control, gain 1 has
-    // a stable half-step correction and leaves one control tick of lag.
+    // Fixed bundled position servo: gain 1 with 200 Hz physics and 100 Hz
+    // control. This is a simulator actuator property, not a hardware
+    // calibration.
     if (!node->has_parameter("position_proportional_gain"))
       node->declare_parameter<double>("position_proportional_gain", 1.0);
     const auto gain = node->set_parameter(

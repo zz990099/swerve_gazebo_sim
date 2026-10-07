@@ -1,150 +1,85 @@
-# Explicit chassis velocity and mode interface (0.3)
+# Chassis interface
 
-`ChassisController` receives body velocity and explicit mode requests. It owns
-all eight ros2_control command interfaces, replacing either the default Twist
-controller or external joint endpoint. It never infers mode from velocity.
-It reuses installed MPPI 0.20 `TimedExecutor`, `ProfileRunner` and the existing
-`EndpointGuard`. Stochastic planning remains outside the controller manager.
-The companion `mppi.launch.py` starts the implemented MPPI planning node; Nav2
-lifecycle/TF integration remains separate. Shared `safety` configuration now
-propagates the physical collision bound and margin to both planning and execution;
-see [MPPI_ROS.md](MPPI_ROS.md) for geometry and prediction diagnostics.
+All topic names below are relative to the robot namespace. Joint order is
+FL, FR, RL, RR. Coordinates are body x-forward, y-left, positive yaw CCW.
+All values must be finite. Commands are planar; unused Twist components are zero.
 
-## Build and start
+| Direction | Topic | Type | Semantics |
+|---|---|---|---|
+| Input | `chassis_controller/command` | `ChassisCommand` | Atomic body velocity and explicit mode request |
+| Output | `chassis_controller/state` | `ChassisState` | Measured joints/body twist, actual/requested mode, phase, receipt and fault |
+| Output | `joint_states` | `sensor_msgs/JointState` | Encoder position (rad) and wheel velocity (rad/s) |
+| Output | `odom` | `nav_msgs/Odometry` | Encoder-derived pose/twist; configurable topic and frames |
+| Output | `/tf`, `/tf_static` | TF | Robot transforms; odometry TF independently configurable |
+| Input clock | `/clock` | `rosgraph_msgs/Clock` | Generic Gazebo bridge for ROS observers and clients |
 
-The default build still supports independent Twist/external-joint examples.
-To enable the new interface, install the core first:
+Commands use reliable, volatile, depth-one QoS. Chassis state is best-effort,
+volatile, depth one. Subscribe with compatible QoS. There is no second actuator
+command entry point. `header.frame_id` must equal the configured body frame
+(default `base_footprint`, prefixed when applicable). Header stamps are simulation
+time. State stamps use the physics clock paired with the joint read, independently
+of delayed ROS `/clock` callbacks. Wheel speed in state is **rad/s**, not m/s.
 
-```bash
-git clone https://github.com/zz990099/swerve_mppi.git
-cd swerve_mppi
-git checkout b1e0057b09fb8f9ca08a9e940386680d55a91469
-cmake -S . -B build -DCMAKE_BUILD_TYPE=Release \
-  -DSWERVE_MPPI_BUILD_TESTS=OFF -DCMAKE_INSTALL_PREFIX="$HOME/swerve-core"
-cmake --build build --parallel 2
-cmake --install build
-# In the ROS workspace containing swerve_gazebo_sim:
-colcon build --packages-select swerve_gazebo_sim --cmake-args \
-  -DSWERVE_BUILD_CHASSIS_CONTROLLER=ON -DCMAKE_PREFIX_PATH="$HOME/swerve-core"
-source install/setup.bash
-ros2 launch swerve_gazebo_sim demo_gz.launch.py chassis_control:=true
-# Humble/Fortress: use demo_ign.launch.py.
-```
+## Sessions and expiry
 
-`chassis_control` and `external_joint_control` are mutually exclusive. Manager
-rate is 100 Hz; model intervals are 0.1 simulation seconds. Geometry and
-wheel/steering limits and `mode_switch_timeout` come from `swerve.yaml`; other execution parameters are
-core 0.20.2 defaults. The planning owner must use the same configuration.
-Configuration is startup-only; restart the process to change it. Generated
-messages and existing Python modules share the installed package namespace.
+1. Wait for fresh measured state and stopped wheels. Startup mode is DualAckermann.
+2. Send a reset command with `reset=true`, a session ID greater than the last
+   accepted session, nonzero sequence, `mode=actual_mode`, request ID zero, and
+   zero velocity and entry velocity. Reset does not recenter steering.
+3. Wait for the matching session and Ready/confirmed state. Reset is one-shot;
+   retries use a newer session. Subsequent packets use `reset=false` and strictly
+   increasing sequence numbers in the accepted session.
+4. Publish fresh packets continuously, normally at 50 Hz. Defaults expire after
+   0.5 seconds in either simulation or wall time. Source stamps cannot regress
+   or be future-dated. Replayed sequences, invalid packets and expired commands
+   fault the chassis. Fault handling commands zero wheel speed and holds measured
+   steering. Normal commands cannot rearm a fault; repeat the stopped reset with
+   a newer session.
 
-## Topics and units
+A simulation pause is detected on the first resumed control update; a paused
+physics engine cannot physically execute a stop. Lifecycle deactivate/reactivate
+preserves session history and disarms the controller. Reloading the plugin starts
+a new process-local session history; clients must discover and reset explicitly.
 
-All topics are relative to the robot namespace, volatile and depth one. Commands
-remain reliable. Periodically refreshed context/state snapshots use best effort;
-state subscribers must request best effort. Stale or missing snapshots still stop
-execution under the same age/watchdog checks.
+## Explicit modes
 
-| Topic | Type | Purpose |
-| --- | --- | --- |
-| `chassis_controller/command` | `swerve_gazebo_sim/msg/ChassisCommand` | Velocity, optional mode request, source task and timing envelope |
-| `chassis_controller/context` | `swerve_gazebo_sim/msg/ChassisContext` | Independently refreshed current task and circular obstacles |
-| `chassis_controller/state` | `swerve_gazebo_sim/msg/ChassisState` | Encoder state, mode receipt/confirmation, fault and next execution time |
+| Mode | Value | Admitted body velocity |
+|---|---|---|
+| DualAckermann | 0 | `vy=0`; yaw requires nonzero `vx` |
+| Spin | 1 | `vx=vy=0`; command `wz` |
+| Crab | 2 | `wz=0`; command `vx,vy` |
 
-Mode numbers: **0 DualAckermann, 1 Spin, 2 Crab**. Vector3 encodes
-`x=vx [m/s], y=vy [m/s], z=wz [rad/s]` in `body_frame` (normally
-`<prefix>base_footprint`). Command frame ID must match exactly. Context and state
-pose use `odom_frame` (normally `<prefix>odom`). Heading policy is 0 FollowPath
-or 1 GoalOnly. State wheel speeds are **linear rolling m/s**, steering is rad,
-in FL, FR, RL, RR order. Do not convert returned wheel speeds a second time.
+To switch, while Ready, increment `request_id`, set `mode` to the target,
+set `velocity` to zero, and set `entry_velocity` to a representative legal
+velocity in that mode. Entry velocity specifies steering geometry, not motion.
+The chassis freezes that geometry, brakes with steering held, aligns only after
+measured wheels stop, and requires measured alignment dwell before confirmation.
+Continue refreshing the same request and unchanged entry velocity throughout.
+Wait for matching request ID, actual mode and Ready/confirmed before sending a
+nonzero velocity. A replacement request during a transition is rejected.
 
-| Command | Meaning |
-| --- | --- |
-| `mode=2`, velocity `(0.3,0,0)`, no request | Forward Crab, never reclassified as Ackermann |
-| Authorized zero velocity, no request | Controlled braking/holding, retaining mode and steering |
-| Zero velocity, request ID, target mode and entry velocity | Brake/align/confirm; no permission to drive |
-| `authorized=false` | Immediate cancellation, latched fault and zero wheel commands |
-| Missing next command or stale context | Latched stop; no reuse of an old command |
+Retain the accepted request ID and entry velocity in subsequent drive/hold
+packets; the returned accepted geometry is the original receipt. Changing the
+mode without a new request is invalid. Large steering changes within a mode also
+cause an automatic brake/alignment interval; they do not select a different mode.
 
-For requests, `mode` and `requested_mode` must agree. Entry velocity specifies
-alignment direction/curvature, not drive permission. Retries use new envelope
-sequences but identical ID/payload; changed/replayed requests fault. Await matching
-request ID, actual mode and confirmed state before driving. Zero does not cancel
-a committed transition or clear a fault.
+A zero velocity retains mode and steering while decelerating. It is not a mode
+request and does not imply forward alignment. Signed wheel velocities and
+steering bounded to +/- pi/2 implement reverse directions.
 
-State carries the accepted entry velocity and frozen mechanical steering positions.
-Preserve them in MPPI `VehicleState.accepted_mode_request`, using `request_id` as
-its ID. The receipt persists after confirmation; never reconstruct it from moving
-encoders. Phase/timing/safety enums use core 0.20 ordering. EndpointFault uses the
-codes in EXTERNAL_ENDPOINT.md. `fault=true` always withholds drive authorization.
+## Feedback and limits
 
-## Timing and execution
+Phase: Fault=0, Braking=1, Aligning=2, Ready=3. `confirmed` requires Ready and no
+fault. Fault codes: None=0, Disarmed=1, Clock=2, Feedback=3, Command=4,
+Timeout=5, Transition=6, Write=7. `velocity` is reconstructed from measured joints.
+Encoder odometry is not ground truth or localization. State and odometry consumers
+must enforce their own freshness and synchronization requirements.
 
-Refresh context at least every 0.1 s; maximum source age is 0.15 s. Empty obstacles
-explicitly assert free space; missing context does not. Paths are bounded to 4096
-points and obstacles to 128, without truncation. Each command's source path/ID/
-heading policy must be the original planning task, checked independently against
-latest context.
+`config/swerve.yaml` defines chassis geometry, speed/rate limits, transition dwell
+and timeouts. Updates run at 100 Hz. Steering, wheel and body target rates are
+bounded during normal operation; emergency fault zero commands bypass normal
+acceleration limits. These are simulator command rules, not collision or physical
+braking guarantees. No path, footprint clearance, goal or obstacle is interpreted.
 
-After arm, state advertises `next_execute_at`. Send one fresh command **ahead of**
-each boundary, with that execute_at and short valid_until (e.g. boundary + 0.025 s).
-Keep the original planning source_stamp and actual issuance header stamp; the
-source-to-valid-until span must be <= 0.15 s. Do not repeatedly publish the same
-sequence. A newer ordinary command can replace a queued one before acceptance.
-Cancellation/malformed callbacks cannot be hidden by later valid input between
-hardware updates.
-
-The Gazebo `PhysicsClock` model plugin records `UpdateInfo.simTime` directly in
-the entity-component manager. `StampedGazeboSystem` delegates joint physics to
-the upstream system and exports that model time during the same synchronous read. The
-controller uses that timestamp, rather than the asynchronous controller-manager
-ROS clock. It reads joints directly at application, computes encoder FK/local
-odometry, and calls TimedExecutor with this current snapshot. It does not restamp
-transported ROS observations. Only admitted profiles are sampled at 100 Hz and
-passed through EndpointGuard. Missed model boundaries, profile/context expiry,
-clock rollback and wall watchdogs latch a stop. Pausing physics does not pause
-wall watchdogs. Task/collision rejection uses core's separately checked stop.
-
-Use `state.pose` consistently as the initial planning frame. Python observer odom/TF
-remains available for visualization but is independently integrated, not an exact
-substitute for this snapshot. Both are encoder odometry, not physical ground truth.
-External localization, TF transforms and physical-slip uncertainty are not modeled.
-Bounded execution admission allocates working data; this is a simulation plugin,
-not a claim of allocation-free hard-real-time hardware control.
-
-## Startup and recovery
-
-1. Wait for fresh state and independently verify physical stopping. Initial mode
-   requires canonical measured steering (normally zero-steering Ackermann/Crab).
-2. Start refreshing context before sending the arm command; separate DDS topics
-   do not guarantee arrival order. Publish one authorized zero command with arm=true, no request,
-   and strictly newer nonzero session (< 2^53). Use current source/issuance times,
-   execution no later than receipt and a short unexpired validity window.
-3. Await matching healthy state and stream at advertised boundaries. Do not repeat
-   the arm packet. Reliable transport is used; a failed arm needs a newer session.
-4. On fault, verify stopping and recover with a newer session. Recovery retains
-   last actual mode and measured steering, including noncanonical stopped alignment;
-   arm cannot switch modes. Explicit requests perform subsequent alignment.
-
-History survives lifecycle deactivate/cleanup/reactivate in one plugin instance.
-Sender sessions must increase across sender restarts. Simulator restart creates a
-new endpoint lifetime; drain old traffic. Reset the external MPPI Controller on
-recovery, preserving returned request-ID high-water marks. No other joint writer
-may run alongside this controller.
-
-## Validation
-
-`chassis_runtime_tests` exercises actual core execution: explicit mode, zero,
-measured confirmation/receipt, mutation, timeouts, task mismatch, cancel and recovery.
-`chassis_interface_tests` loads the real plugin with loaned interfaces and typed
-messages over DDS, including a delayed ROS clock with current physics time.
-Existing default/external tests remain enabled.
-
-```bash
-python3 test/run_simulation.py --gazebo-version gz --chassis --logs artifacts/chassis
-```
-
-The physical probe checks Crab forward, Spin entry, retained steering/mode on zero,
-independent Gazebo motion, publisher silence and recovery. It does not certify
-MPPI path tracking, collision margins, slip or braking bounds; these remain
-subsequent planning integration and physical calibration work.
+Mode entry, limits and tracking must be modeled by a planner that needs accurate
+prediction. A planner must not assume its prediction controls the actual wheels.

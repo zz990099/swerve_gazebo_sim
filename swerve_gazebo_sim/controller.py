@@ -1,289 +1,86 @@
 # SPDX-License-Identifier: Apache-2.0
-"""ROS adapter for bounded steering, wheel commands and encoder odometry."""
+"""Encoder odometry observer. The ros2_control plugin exclusively owns commands."""
 
 import math
 
 import rclpy
-from diagnostic_msgs.msg import DiagnosticArray, DiagnosticStatus, KeyValue
-from geometry_msgs.msg import TransformStamped, TwistStamped
+from geometry_msgs.msg import TransformStamped
 from nav_msgs.msg import Odometry
 from rclpy.node import Node
+from rclpy.qos import qos_profile_sensor_data
 from sensor_msgs.msg import JointState
-from std_msgs.msg import Float64MultiArray
 from tf2_ros import TransformBroadcaster
 
-from swerve_gazebo_sim.bringup import (
-    COMMAND_DEFAULTS,
-    ODOMETRY_DEFAULTS,
-    TRANSITION_DEFAULTS,
-    validate_control,
-)
+from swerve_gazebo_sim.bringup import OBSERVER_DEFAULTS
 from swerve_gazebo_sim.kinematics import SwerveKinematics, integrate_pose
-from swerve_gazebo_sim.motion import MotionSupervisor, TransitionPhase
 
 
-class SwerveController(Node):
+class OdometryObserver(Node):
     def __init__(self, **kwargs):
-        super().__init__("swerve_controller", **kwargs)
-        defaults = {
-            "wheelbase": 0.6,
-            "track_width": 0.5,
-            "wheel_radius": 0.1,
-            "steering_limit": math.pi / 2,
-            "update_rate": 100.0,
-            "cmd_timeout": 0.5,
-            "feedback_timeout": 0.25,
-            "max_wheel_speed": 20.0,
-            "max_wheel_acceleration": 40.0,
-            "max_steering_rate": 2.5,
-            "steering_alignment_tolerance": 0.05,
-            **TRANSITION_DEFAULTS,
-            **ODOMETRY_DEFAULTS,
-            **COMMAND_DEFAULTS,
-            "publish_odom_tf": True,
-            "pose_variance": 0.02,
-            "twist_variance": 0.02,
-            "joint_prefix": "",
-            "frame_prefix": "",
-        }
+        super().__init__("swerve_odometry", **kwargs)
+        defaults = dict(
+            OBSERVER_DEFAULTS,
+            wheelbase=0.6,
+            track_width=0.5,
+            wheel_radius=0.1,
+            joint_prefix="",
+            frame_prefix="",
+        )
         for key, value in defaults.items():
             self.declare_parameter(key, value)
         self.configuration = {key: self.get_parameter(key).value for key in defaults}
-        validate_control(self.configuration)
-
         self.kinematics = SwerveKinematics(
-            self.configuration["wheelbase"],
-            self.configuration["track_width"],
-            self.configuration["wheel_radius"],
-            self.configuration["steering_limit"],
+            *(
+                self.configuration[k]
+                for k in ("wheelbase", "track_width", "wheel_radius")
+            )
         )
-        self.external_joint_control = (
-            self.configuration["external_joint_control"]
-            or self.configuration["chassis_control"]
-        )
-        self.supervisor = (
-            None
-            if self.external_joint_control
-            else MotionSupervisor(self.kinematics, self.configuration)
-        )
-        self.measured_speeds = [0.0] * 4
-        corners = ("fl", "fr", "rl", "rr")
+        for key in ("feedback_timeout", "pose_variance", "twist_variance"):
+            if (
+                not math.isfinite(self.configuration[key])
+                or self.configuration[key] <= 0
+            ):
+                raise ValueError(f"Invalid {key}")
         self.wheel_joint_names = [
-            self.configuration["joint_prefix"] + corner + "_wheel_joint"
-            for corner in corners
+            self.configuration["joint_prefix"] + c + "_wheel_joint"
+            for c in ("fl", "fr", "rl", "rr")
         ]
         self.steering_joint_names = [
-            self.configuration["joint_prefix"] + corner + "_steering_joint"
-            for corner in corners
+            self.configuration["joint_prefix"] + c + "_steering_joint"
+            for c in ("fl", "fr", "rl", "rr")
         ]
         self.odom_frame = (
             self.configuration["odom_frame"]
             or self.configuration["frame_prefix"] + "odom"
         )
-        self.base_frame = self.configuration["frame_prefix"] + "base_footprint"
         self.odom_child_frame = (
-            self.configuration["odom_child_frame"] or self.base_frame
+            self.configuration["odom_child_frame"]
+            or self.configuration["frame_prefix"] + "base_footprint"
         )
         if self.odom_frame == self.odom_child_frame:
-            raise ValueError("Odometry parent and child frames must differ")
-        self.command = (0.0, 0.0, 0.0)
-        self.command_stamp = None
-        self.feedback_stamp = None
-        self.angles = [0.0] * 4
-        self.sent_angles = [0.0] * 4
-        self.sent_speeds = [0.0] * 4
-        self.requested_mode = None
-        self.active_mode = None
-        self.steering_is_aligned = True
+            raise ValueError("Odometry frames must differ")
         self.pose = (0.0, 0.0, 0.0)
-        self.previous_odom_stamp_ns = None
+        self.feedback_stamp = self.previous_odom_stamp_ns = None
         self._last_clock_ns = self.get_clock().now().nanoseconds
-        self.last_tick = self._last_clock_ns * 1e-9
-        self.wheel_pub = (
-            self.create_publisher(Float64MultiArray, "wheel_controller/commands", 10)
-            if not self.external_joint_control
-            else None
-        )
-        self.steer_pub = (
-            self.create_publisher(Float64MultiArray, "steering_controller/commands", 10)
-            if not self.external_joint_control
-            else None
-        )
         self.odom_pub = (
             self.create_publisher(Odometry, self.configuration["odom_topic"], 10)
             if self.configuration["publish_odom"]
             else None
         )
-        self.status_pub = self.create_publisher(DiagnosticArray, "drive_status", 10)
         self.transform_broadcaster = (
             TransformBroadcaster(self)
             if self.configuration["publish_odom_tf"]
             else None
         )
-        if not self.external_joint_control:
-            self.create_subscription(TwistStamped, "cmd_vel", self.on_command, 10)
-            self.create_timer(1.0 / self.configuration["update_rate"], self.on_timer)
-        self.create_subscription(JointState, "joint_states", self.on_feedback, 10)
-        self.create_timer(
-            1.0 / self.configuration["status_publish_rate"], self.publish_status
+        self.create_subscription(
+            JointState, "joint_states", self.on_feedback, qos_profile_sensor_data
         )
 
     def _observe_clock(self, now_ns):
-        # Message ordering does not establish a world reset. Only an observed
-        # ROS clock rollback clears the current epoch, in either control mode.
         if now_ns < self._last_clock_ns:
-            self.command_stamp = None
-            self.feedback_stamp = None
-            self.previous_odom_stamp_ns = None
+            self.feedback_stamp = self.previous_odom_stamp_ns = None
             self.pose = (0.0, 0.0, 0.0)
-            self.sent_speeds = [0.0] * 4
-            self.requested_mode = None
-            self.active_mode = None
-            if self.supervisor is not None:
-                self.supervisor.reset()
-            # A feedback/status callback may observe the rollback before the
-            # drive timer. Do not reset newly accepted feedback a second time.
-            self.last_tick = now_ns * 1e-9
         self._last_clock_ns = now_ns
-
-    def on_command(self, msg):
-        if self.external_joint_control:
-            return
-        now_ns = self.get_clock().now().nanoseconds
-        self._observe_clock(now_ns)
-        now = now_ns * 1e-9
-        stamp = msg.header.stamp.sec + msg.header.stamp.nanosec * 1e-9
-        values = (msg.twist.linear.x, msg.twist.linear.y, msg.twist.angular.z)
-        # Empty frame means base frame; a zero stamp explicitly uses reception time.
-        if (
-            not all(math.isfinite(v) for v in values)
-            or msg.header.frame_id not in ("", self.base_frame)
-            or (
-                stamp != 0
-                and (
-                    now - stamp > self.configuration["cmd_timeout"] or stamp - now > 0.1
-                )
-            )
-        ):
-            self.command_stamp = None
-            return
-        self.command = values
-        self.command_stamp = now if stamp == 0 else stamp
-
-    def on_timer(self):
-        if self.external_joint_control:
-            return  # The external profile publisher exclusively owns joint commands.
-        now_ns = self.get_clock().now().nanoseconds
-        self._observe_clock(now_ns)
-        now = now_ns * 1e-9
-        dt = now - self.last_tick
-        self.last_tick = now
-        dt = max(0.0, min(dt, 0.1))
-        command_is_current = self.command_stamp is not None and (
-            0 <= now - self.command_stamp <= self.configuration["cmd_timeout"]
-        )
-        feedback_is_current = self.feedback_stamp is not None and (
-            0 <= now - self.feedback_stamp <= self.configuration["feedback_timeout"]
-        )
-        previous_phase = self.supervisor.phase
-        decision = self.supervisor.update(
-            self.command,
-            self.angles,
-            self.measured_speeds,
-            self.sent_angles,
-            now,
-            command_is_current,
-            feedback_is_current,
-        )
-        self.requested_mode = self.supervisor.requested_mode
-        self.active_mode = self.supervisor.active_mode
-        self.steering_is_aligned = feedback_is_current and all(
-            abs(target - measured) <= self.configuration["steering_alignment_tolerance"]
-            for target, measured in zip(decision.steering_targets, self.angles)
-        )
-        self._move_steering_toward(decision.steering_targets, dt)
-        if decision.drive_enabled:
-            self._move_wheels_toward(decision.wheel_targets, dt)
-        else:
-            self.sent_speeds = [0.0] * 4
-        if (
-            self.supervisor.phase is TransitionPhase.FAULT
-            and previous_phase is not TransitionPhase.FAULT
-        ):
-            self.get_logger().error(self.supervisor.reason)
-
-        self.wheel_pub.publish(Float64MultiArray(data=self.sent_speeds))
-        self.steer_pub.publish(Float64MultiArray(data=self.sent_angles))
-
-    def publish_status(self):
-        now_ns = self.get_clock().now().nanoseconds
-        self._observe_clock(now_ns)
-        status = DiagnosticStatus()
-        status.name = self.get_fully_qualified_name() + "/motion"
-        status.hardware_id = self.base_frame
-        if self.external_joint_control:
-            now = now_ns * 1e-9
-            current = self.feedback_stamp is not None and (
-                0 <= now - self.feedback_stamp <= self.configuration["feedback_timeout"]
-            )
-            status.level = DiagnosticStatus.OK if current else DiagnosticStatus.WARN
-            status.message = (
-                "external joint control"
-                if current
-                else "external control: stale feedback"
-            )
-            status.values = [KeyValue(key="command_owner", value="external")]
-            array = DiagnosticArray()
-            array.header.stamp = self.get_clock().now().to_msg()
-            array.status = [status]
-            self.status_pub.publish(array)
-            return
-        if self.supervisor.phase is TransitionPhase.FAULT:
-            status.level = DiagnosticStatus.ERROR
-        elif self.supervisor.reason not in ("", "stopped"):
-            status.level = DiagnosticStatus.WARN
-        else:
-            status.level = DiagnosticStatus.OK
-        status.message = self.supervisor.reason or self.supervisor.phase.value
-        status.values = [
-            KeyValue(
-                key="requested_mode",
-                value=self.requested_mode.value if self.requested_mode else "none",
-            ),
-            KeyValue(
-                key="active_mode",
-                value=self.active_mode.value if self.active_mode else "none",
-            ),
-            KeyValue(key="phase", value=self.supervisor.phase.value),
-            KeyValue(
-                key="max_steering_error", value=str(self.supervisor.max_steering_error)
-            ),
-            KeyValue(key="wheels_stopped", value=str(self.supervisor.wheels_stopped)),
-        ]
-        array = DiagnosticArray()
-        array.header.stamp = self.get_clock().now().to_msg()
-        array.status = [status]
-        self.status_pub.publish(array)
-
-    def _move_steering_toward(self, targets, dt):
-        maximum_step = self.configuration["max_steering_rate"] * dt
-        for module_index, target in enumerate(targets):
-            error = target - self.sent_angles[module_index]
-            step = max(-maximum_step, min(maximum_step, error))
-            self.sent_angles[module_index] += step
-
-    def _move_wheels_toward(self, targets, dt):
-        speed_scale = max(
-            1.0,
-            max(abs(value) for value in targets)
-            / self.configuration["max_wheel_speed"],
-        )
-        maximum_step = self.configuration["max_wheel_acceleration"] * dt
-        for module_index, target in enumerate(targets):
-            limited_target = target / speed_scale
-            error = limited_target - self.sent_speeds[module_index]
-            step = max(-maximum_step, min(maximum_step, error))
-            self.sent_speeds[module_index] += step
 
     def on_feedback(self, msg):
         now_ns = self.get_clock().now().nanoseconds
@@ -315,8 +112,6 @@ class SwerveController(Node):
                 self.pose = integrate_pose(self.pose, twist, dt)
             # A gap does not justify extrapolating an unobserved trajectory.
         self.previous_odom_stamp_ns = stamp_ns
-        if self.feedback_stamp is None:
-            self.sent_angles = list(angles)
         self.feedback_stamp = stamp_ns * 1e-9
         self.angles = angles
         self.measured_speeds = speeds
@@ -351,7 +146,7 @@ class SwerveController(Node):
 
 def main(args=None):
     rclpy.init(args=args)
-    node = SwerveController()
+    node = OdometryObserver()
     try:
         rclpy.spin(node)
     except KeyboardInterrupt:

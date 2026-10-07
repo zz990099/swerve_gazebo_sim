@@ -26,43 +26,15 @@ from launch_ros.actions import Node
 
 from launch import LaunchDescription
 
-from .bringup import ODOMETRY_DEFAULTS, controller_config, load_config, names
+from .bringup import (
+    OBSERVER_DEFAULTS,
+    ODOMETRY_DEFAULTS,
+    controller_config,
+    load_config,
+    names,
+)
 
 PACKAGE_NAME = "swerve_gazebo_sim"
-
-
-def external_control_launch_argument():
-    return DeclareLaunchArgument(
-        "external_joint_control",
-        default_value="",
-        description="External owner publishes sampled joint profiles; empty uses YAML",
-    )
-
-
-def external_control_parameters(context, configuration):
-    value = LaunchConfiguration("external_joint_control").perform(context)
-    if not value:
-        return {"external_joint_control": configuration["external_joint_control"]}
-    if value.lower() not in ("true", "false"):
-        raise ValueError("external_joint_control must be true or false")
-    return {"external_joint_control": value.lower() == "true"}
-
-
-def chassis_control_launch_argument():
-    return DeclareLaunchArgument(
-        "chassis_control",
-        default_value="",
-        description="Explicit body velocity/mode controller; requires chassis-enabled build",
-    )
-
-
-def chassis_control_parameters(context, configuration):
-    value = LaunchConfiguration("chassis_control").perform(context)
-    if not value:
-        return {"chassis_control": configuration["chassis_control"]}
-    if value.lower() not in ("true", "false"):
-        raise ValueError("chassis_control must be true or false")
-    return {"chassis_control": value.lower() == "true"}
 
 
 def odometry_launch_arguments():
@@ -105,14 +77,6 @@ def spawn_setup(context, variant):
         LaunchConfiguration("prefix").perform(context),
     )
     configuration = load_config(config_file)
-    # Select interface ownership before generating ros2_control configuration.
-    configuration["control"].update(
-        external_control_parameters(context, configuration["control"])
-    )
-
-    configuration["control"].update(
-        chassis_control_parameters(context, configuration["control"])
-    )
     configuration["control"].update(
         odometry_parameters(context, configuration["control"])
     )
@@ -148,7 +112,6 @@ def spawn_setup(context, variant):
     )
     xacro_mappings = {
         "gazebo_version": variant["name"],
-        "chassis_control": str(configuration["control"]["chassis_control"]).lower(),
         "config_file": config_file,
         "prefix": prefix,
         "namespace": namespace,
@@ -218,15 +181,7 @@ def spawn_setup(context, variant):
         output="screen",
         arguments=[
             "joint_state_broadcaster",
-            *(
-                ["chassis_controller"]
-                if configuration["control"]["chassis_control"]
-                else (
-                    ["guarded_joint_controller"]
-                    if configuration["control"]["external_joint_control"]
-                    else ["steering_controller", "wheel_controller"]
-                )
-            ),
+            "chassis_controller",
             "--controller-manager",
             f"{namespace}/controller_manager",
             "--controller-manager-timeout",
@@ -236,7 +191,9 @@ def spawn_setup(context, variant):
         ],
     )
 
-    controller_node_parameters = dict(configuration["control"])
+    controller_node_parameters = {
+        key: configuration["control"][key] for key in OBSERVER_DEFAULTS
+    }
     for parameter_name in ("wheelbase", "track_width", "wheel_radius"):
         controller_node_parameters[parameter_name] = configuration["geometry"][
             parameter_name
@@ -250,9 +207,6 @@ def spawn_setup(context, variant):
     )
     controller_node_parameters.update(
         odometry_parameters(context, configuration["control"])
-    )
-    controller_node_parameters.update(
-        external_control_parameters(context, configuration["control"])
     )
     swerve_controller = Node(
         executable=sys.executable,
@@ -389,8 +343,6 @@ def generate_spawn_launch_description(variant):
     )
     for argument in odometry_launch_arguments():
         launch_description.add_action(argument)
-    launch_description.add_action(external_control_launch_argument())
-    launch_description.add_action(chassis_control_launch_argument())
     launch_description.add_action(declare_namespace)
     launch_description.add_action(declare_prefix)
     launch_description.add_action(declare_robot_name)
@@ -440,14 +392,10 @@ def demo_setup(context, variant):
             "config": LaunchConfiguration("config").perform(context),
             "bridge_config": LaunchConfiguration("bridge_config").perform(context),
             "start_bridge": LaunchConfiguration("start_bridge").perform(context),
-            "external_joint_control": LaunchConfiguration(
-                "external_joint_control"
-            ).perform(context),
             **{
                 key: LaunchConfiguration(key).perform(context)
                 for key in (*ODOMETRY_DEFAULTS, "publish_odom_tf")
             },
-            "chassis_control": LaunchConfiguration("chassis_control").perform(context),
             "namespace": LaunchConfiguration("namespace").perform(context),
             "prefix": LaunchConfiguration("prefix").perform(context),
             "robot_name": LaunchConfiguration("robot_name").perform(context),
@@ -552,8 +500,6 @@ def generate_demo_launch_description(variant):
     )
     for argument in odometry_launch_arguments():
         launch_description.add_action(argument)
-    launch_description.add_action(external_control_launch_argument())
-    launch_description.add_action(chassis_control_launch_argument())
     launch_description.add_action(declare_namespace)
     launch_description.add_action(declare_prefix)
     launch_description.add_action(declare_robot_name)

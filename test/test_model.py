@@ -7,8 +7,6 @@ import xacro
 import yaml
 
 from swerve_gazebo_sim.bringup import (
-    ODOMETRY_DEFAULTS,
-    TRANSITION_DEFAULTS,
     controller_config,
     gazebo_variant,
     load_config,
@@ -16,21 +14,6 @@ from swerve_gazebo_sim.bringup import (
 )
 
 ROOT = Path(__file__).resolve().parents[1]
-
-
-def test_external_control_configuration_defaults_and_type(tmp_path):
-    config = yaml.safe_load((ROOT / "config/swerve.yaml").read_text())
-    del config["control"]["external_joint_control"]
-    path = tmp_path / "legacy.yaml"
-    path.write_text(yaml.safe_dump(config))
-    assert load_config(path)["control"]["external_joint_control"] is False
-    config["control"]["external_joint_control"] = True
-    path.write_text(yaml.safe_dump(config))
-    assert load_config(path)["control"]["external_joint_control"] is True
-    config["control"]["external_joint_control"] = "true"
-    path.write_text(yaml.safe_dump(config))
-    with pytest.raises(ValueError, match="external_joint_control"):
-        load_config(path)
 
 
 def test_geometry_has_eight_actuated_joints_and_consistent_dimensions(tmp_path):
@@ -119,7 +102,7 @@ def test_public_model_combines_chassis_and_plugins(
         assert contact.find("mu1").text == "1.0"
         assert contact.find("mu2").text == "1.0"
         assert contact.find("fdir1") is None
-    assert len(root.findall(".//gazebo/plugin")) == 1
+    assert len(root.findall(".//gazebo/plugin")) == 2
     assert root.find(".//gazebo/plugin/parameters").text == "/tmp/controllers.yaml"
     assert root.find(".//gazebo/plugin/ros/namespace").text == "/robot1"
     with_truth = ET.fromstring(
@@ -128,7 +111,7 @@ def test_public_model_combines_chassis_and_plugins(
             mappings=dict(mappings, publish_ground_truth="true"),
         ).toxml()
     )
-    assert len(with_truth.findall(".//gazebo/plugin")) == 2
+    assert len(with_truth.findall(".//gazebo/plugin")) == 3
     odometry_plugin = with_truth.find(
         f".//gazebo/plugin[@filename='{plugin_filename}']"
     )
@@ -146,7 +129,6 @@ def test_chassis_model_exports_synchronous_physics_clock(gazebo_version):
                 "gazebo_version": gazebo_version,
                 "config_file": str(ROOT / "config/swerve.yaml"),
                 "prefix": "bot_",
-                "chassis_control": "true",
             },
         ).toxml()
     )
@@ -230,7 +212,7 @@ def test_namespace_and_controller_joint_alignment():
         prefix,
     )
     assert (
-        cfg["/fleet/robot1/wheel_controller"]["ros__parameters"]["joints"][0]
+        cfg["/fleet/robot1/chassis_controller"]["ros__parameters"]["wheel_joints"][0]
         == "fleet_robot1_fl_wheel_joint"
     )
 
@@ -240,12 +222,19 @@ def test_invalid_namespace():
         names("bad-name", "swerve", "auto")
 
 
-def test_legacy_configuration_gets_transition_defaults(tmp_path):
+@pytest.mark.parametrize("change", ["missing", "unknown", "duplicate", "negative"])
+def test_reject_noncurrent_configuration(tmp_path, change):
     cfg = load_config(ROOT / "config/swerve.yaml")
-    for key in {**TRANSITION_DEFAULTS, **ODOMETRY_DEFAULTS}:
-        del cfg["control"][key]
-    path = tmp_path / "legacy.yaml"
-    path.write_text(yaml.safe_dump(cfg))
-    loaded = load_config(path)
-    for key, value in {**TRANSITION_DEFAULTS, **ODOMETRY_DEFAULTS}.items():
-        assert loaded["control"][key] == value
+    if change == "missing":
+        del cfg["control"]["cmd_timeout"]
+    elif change == "unknown":
+        cfg["control"]["external_joint_control"] = False
+    elif change == "negative":
+        cfg["control"]["max_linear_acceleration"] = -1
+    text = yaml.safe_dump(cfg)
+    if change == "duplicate":
+        text += "control: {}\n"
+    path = tmp_path / "invalid.yaml"
+    path.write_text(text)
+    with pytest.raises(ValueError):
+        load_config(path)

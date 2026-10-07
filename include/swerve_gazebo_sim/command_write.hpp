@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 #pragma once
-#include "swerve_gazebo_sim/endpoint_guard.hpp"
+#include "swerve_gazebo_sim/chassis_runtime.hpp"
 #include <type_traits>
 
 namespace swerve_gazebo_sim {
@@ -8,10 +8,12 @@ namespace swerve_gazebo_sim {
 // Attempt EVERY interface even after one failure; the caller must latch a fault
 // and retry zero wheel targets before reporting a healthy update.
 template <class Interfaces>
-bool write_joint_targets(Interfaces &interfaces, const std::array<std::size_t, 8> &indices,
-                         const EndpointTargets &targets) {
+bool write_joint_targets(Interfaces &interfaces,
+                         const std::array<std::size_t, 8> &indices,
+                         const JointTargets &targets) {
   auto set = [&](std::size_t index, double value) {
-    if constexpr (std::is_void_v<decltype(interfaces[index].set_value(value))>) {
+    if constexpr (std::is_void_v<decltype(interfaces[index].set_value(
+                      value))>) {
       interfaces[index].set_value(value);
       return true;
     } else {

@@ -6,7 +6,6 @@
     name="config_file"
     default="$(find swerve_gazebo_sim)/config/swerve.yaml"
   />
-  <xacro:arg name="chassis_control" default="false" />
   <xacro:arg name="gazebo_version" default="ign" />
   <xacro:arg name="prefix" default="" />
   <xacro:arg name="namespace" default="" />
@@ -19,10 +18,10 @@
   />
 
   <xacro:include
-    filename="$(find swerve_gazebo_sim)/urdf/chassis.urdf.xacro"
+    filename="chassis.urdf.xacro"
   />
   <xacro:include
-    filename="$(find swerve_gazebo_sim)/urdf/plugins.urdf.xacro"
+    filename="plugins.urdf.xacro"
   />
 
   <xacro:swerve_chassis
@@ -32,7 +31,6 @@
   />
 
   <xacro:swerve_plugins
-    chassis_control="$(arg chassis_control)"
     prefix="$(arg prefix)"
     namespace="$(arg namespace)"
     controllers_file="$(arg controllers_file)"

@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
-"""Configuration shared by launch and model validation tests."""
+"""Strict current chassis configuration shared by model, plugin and launch."""
 
 import math
 import re
@@ -19,96 +19,42 @@ GEOMETRY = (
     "wheel_mass",
     "steering_mass",
 )
-CONTROL = (
-    "external_joint_control",
-    "chassis_control",
-    "update_rate",
-    "cmd_timeout",
-    "feedback_timeout",
+
+CHASSIS_PARAMETERS = (
+    "steering_limit",
     "max_wheel_speed",
     "max_wheel_acceleration",
     "max_steering_rate",
     "steering_alignment_tolerance",
-    "mode_linear_enter_threshold",
-    "mode_linear_exit_threshold",
-    "mode_angular_enter_threshold",
-    "mode_angular_exit_threshold",
-    "mode_dwell_time",
     "steering_alignment_duration",
     "mode_switch_timeout",
     "stopped_wheel_speed",
-    "status_publish_rate",
-    "steering_limit",
-    "publish_odom_tf",
-    "publish_odom",
-    "odom_topic",
-    "odom_frame",
-    "odom_child_frame",
-    "pose_variance",
-    "twist_variance",
+    "cmd_timeout",
+    "wall_timeout",
+    "update_rate",
+    "drive_steering_limit",
+    "max_linear_speed",
+    "max_angular_speed",
+    "max_linear_acceleration",
+    "max_angular_acceleration",
 )
-
-TRANSITION_DEFAULTS = {
-    "mode_linear_enter_threshold": 0.01,
-    "mode_linear_exit_threshold": 0.005,
-    "mode_angular_enter_threshold": 0.01,
-    "mode_angular_exit_threshold": 0.005,
-    "mode_dwell_time": 0.1,
-    "steering_alignment_duration": 0.05,
-    "mode_switch_timeout": 5.0,
-    "stopped_wheel_speed": 0.05,
-    "status_publish_rate": 10.0,
-}
-
 ODOMETRY_DEFAULTS = {
     "publish_odom": True,
     "odom_topic": "odom",
     "odom_frame": "",
     "odom_child_frame": "",
 }
-COMMAND_DEFAULTS = {"external_joint_control": False, "chassis_control": False}
-SAFETY_DEFAULTS = {"robot_radius": "auto", "collision_margin": 0.05}
-
-
-def safety_parameters(configuration):
-    """Bound the complete XY collision geometry, including every steering angle."""
-    g = configuration["geometry"]
-    safety = configuration.get("safety", SAFETY_DEFAULTS)
-    if not isinstance(safety, dict) or set(safety) != set(SAFETY_DEFAULTS):
-        raise ValueError("safety must contain robot_radius and collision_margin")
-    minimum = max(
-        math.hypot(g["body_length"] / 2, g["body_width"] / 2),
-        math.hypot(g["wheelbase"] / 2, g["track_width"] / 2)
-        + math.hypot(g["wheel_radius"], g["wheel_width"] / 2),
-    )
-    radius = safety["robot_radius"]
-    if radius == "auto":
-        # Round outwards to centimetres; the bundled geometry retains 0.5 m.
-        if not math.isfinite(minimum * 100):
-            raise ValueError("unrepresentable collision geometry")
-        radius = math.ceil(minimum * 100) / 100
-        radius = max(radius, minimum)
-    if (
-        isinstance(radius, bool)
-        or not isinstance(radius, (int, float))
-        or not math.isfinite(radius)
-        or radius < minimum
-        or radius <= 0
-    ):
-        raise ValueError(
-            f"robot_radius must cover the collision geometry ({minimum} m)"
-        )
-    margin = safety["collision_margin"]
-    if (
-        isinstance(margin, bool)
-        or not isinstance(margin, (int, float))
-        or not math.isfinite(margin)
-        or margin < 0
-        or not math.isfinite(radius + margin)
-    ):
-        raise ValueError("collision_margin must be finite and nonnegative")
-    return {"robot_radius_m": float(radius), "collision_margin_m": float(margin)}
-
+OBSERVER_DEFAULTS = {
+    "publish_odom": True,
+    "publish_odom_tf": True,
+    "odom_topic": "odom",
+    "odom_frame": "",
+    "odom_child_frame": "",
+    "pose_variance": 0.02,
+    "twist_variance": 0.02,
+    "feedback_timeout": 0.25,
+}
+CONTROL = CHASSIS_PARAMETERS + tuple(OBSERVER_DEFAULTS)
 
 GAZEBO_VARIANTS = {
     "ign": {
@@ -141,66 +87,6 @@ def gazebo_variant(name):
         raise ValueError(f"gazebo_version must be one of: {supported}") from error
 
 
-def load_config(path):
-    with open(path, encoding="utf-8") as stream:
-        cfg = yaml.safe_load(stream)
-    if (
-        not isinstance(cfg, dict)
-        or not {"geometry", "control"} <= set(cfg)
-        or set(cfg) - {"geometry", "control", "safety"}
-    ):
-        raise ValueError("Configuration requires geometry/control and optional safety")
-    cfg.setdefault("safety", dict(SAFETY_DEFAULTS))
-    if isinstance(cfg["control"], dict):
-        for key, value in {
-            **TRANSITION_DEFAULTS,
-            **ODOMETRY_DEFAULTS,
-            **COMMAND_DEFAULTS,
-        }.items():
-            cfg["control"].setdefault(key, value)
-    for section, keys in (("geometry", GEOMETRY), ("control", CONTROL)):
-        if not isinstance(cfg[section], dict) or set(cfg[section]) != set(keys):
-            raise ValueError(f'{section} must contain exactly: {", ".join(keys)}')
-        for key, value in cfg[section].items():
-            if key in (
-                "publish_odom",
-                "publish_odom_tf",
-                "external_joint_control",
-                "chassis_control",
-            ):
-                if not isinstance(value, bool):
-                    raise ValueError(f"{key} must be boolean")
-            elif key in ("odom_topic", "odom_frame", "odom_child_frame"):
-                continue  # Validated with the controller's startup parameters below.
-            elif (
-                isinstance(value, bool)
-                or not isinstance(value, (int, float))
-                or not math.isfinite(value)
-                or value < 0
-                or (
-                    value == 0
-                    and key not in ("mode_dwell_time", "steering_alignment_duration")
-                )
-            ):
-                raise ValueError(f"{section}.{key} must be finite and positive")
-            else:
-                cfg[section][key] = float(value)
-    validate_control(cfg["control"])
-    if not math.isclose(cfg["control"]["steering_limit"], math.pi / 2, abs_tol=1e-9):
-        raise ValueError("steering_limit must be pi/2 for this release")
-    if not cfg["control"]["update_rate"].is_integer():
-        raise ValueError("update_rate must be a positive integer frequency")
-    geometry = cfg["geometry"]
-    if geometry["track_width"] <= geometry["body_width"] + 2 * geometry["wheel_radius"]:
-        raise ValueError(
-            "track_width must clear the body plus the steering wheel sweep"
-        )
-    if geometry["wheelbase"] <= 2 * geometry["wheel_radius"]:
-        raise ValueError("wheelbase must exceed the wheel diameter")
-    safety_parameters(cfg)
-    return cfg
-
-
 def names(namespace, robot_name, prefix):
     namespace = "/" + namespace.strip("/") if namespace.strip("/") else ""
     for token in namespace.split("/"):
@@ -215,6 +101,83 @@ def names(namespace, robot_name, prefix):
     return namespace, prefix
 
 
+class UniqueLoader(yaml.SafeLoader):
+    pass
+
+
+def unique_mapping(loader, node):
+    result = {}
+    for key_node, value_node in node.value:
+        key = loader.construct_object(key_node)
+        if key in result:
+            raise ValueError(f"Duplicate configuration key: {key}")
+        result[key] = loader.construct_object(value_node)
+    return result
+
+
+UniqueLoader.add_constructor(
+    yaml.resolver.BaseResolver.DEFAULT_MAPPING_TAG, unique_mapping
+)
+
+
+def validate_control(c):
+    for key in CONTROL:
+        value = c[key]
+        if key in ("publish_odom", "publish_odom_tf"):
+            if not isinstance(value, bool):
+                raise ValueError(f"{key} must be boolean")
+        elif key in ("odom_topic", "odom_frame", "odom_child_frame"):
+            if not isinstance(value, str) or any(x.isspace() for x in value):
+                raise ValueError(f"Invalid {key}")
+            if key == "odom_topic" and not value:
+                raise ValueError("odom_topic is required")
+            if key != "odom_topic" and value.startswith("/"):
+                raise ValueError("Frame names must not start with /")
+        elif (
+            isinstance(value, bool)
+            or not isinstance(value, (int, float))
+            or not math.isfinite(value)
+            or value <= 0
+        ):
+            raise ValueError(f"{key} must be finite and positive")
+    if c["update_rate"] != 100 or abs(c["steering_limit"] - math.pi / 2) > 1e-9:
+        raise ValueError(
+            "This chassis requires 100 Hz control and pi/2 steering travel"
+        )
+    if c["mode_switch_timeout"] <= c["steering_alignment_duration"]:
+        raise ValueError("Mode deadline must exceed alignment dwell")
+    if c["drive_steering_limit"] < c["steering_alignment_tolerance"]:
+        raise ValueError("Moving steering limit must cover alignment tolerance")
+    if c["odom_frame"] and c["odom_frame"] == c["odom_child_frame"]:
+        raise ValueError("Odometry frames must differ")
+
+
+def load_config(path):
+    with open(path, encoding="utf-8") as stream:
+        cfg = yaml.load(stream, Loader=UniqueLoader)
+    if not isinstance(cfg, dict) or set(cfg) != {"geometry", "control"}:
+        raise ValueError("Expected exactly geometry and control")
+    for section, keys in (("geometry", GEOMETRY), ("control", CONTROL)):
+        if not isinstance(cfg[section], dict) or set(cfg[section]) != set(keys):
+            raise ValueError(f"{section} must contain exactly {keys}")
+    g = cfg["geometry"]
+    for key, value in g.items():
+        if (
+            isinstance(value, bool)
+            or not isinstance(value, (int, float))
+            or not math.isfinite(value)
+            or value <= 0
+        ):
+            raise ValueError(f"Invalid geometry.{key}")
+    if (
+        g["track_width"] <= g["body_width"] + 2 * g["wheel_radius"]
+        or g["wheelbase"] <= 2 * g["wheel_radius"]
+    ):
+        raise ValueError("Wheel steering sweep must clear chassis and adjacent wheels")
+    validate_control(cfg["control"])
+    return cfg
+
+
 def controller_config(template, cfg, namespace, prefix):
     with open(template, encoding="utf-8") as stream:
         data = yaml.safe_load(stream)
@@ -223,118 +186,22 @@ def controller_config(template, cfg, namespace, prefix):
     data["controller_manager"]["ros__parameters"]["update_rate"] = int(
         cfg["control"]["update_rate"]
     )
-    controllers = (
-        ("steering_controller", "steering"),
-        ("wheel_controller", "wheel"),
+    parameters = {key: float(cfg["control"][key]) for key in CHASSIS_PARAMETERS}
+    parameters.update(
+        {
+            key: float(cfg["geometry"][key])
+            for key in ("wheelbase", "track_width", "wheel_radius")
+        }
     )
-    for controller_name, joint_type in controllers:
-        data[controller_name]["ros__parameters"]["joints"] = [
-            f"{prefix}{corner}_{joint_type}_joint"
+    parameters.update(
+        use_sim_time=True,
+        body_frame=prefix + "base_footprint",
+        simulation_time_interface=prefix + "execution_clock/simulation_time",
+    )
+    for kind in ("steering", "wheel"):
+        parameters[kind + "_joints"] = [
+            prefix + corner + "_" + kind + "_joint"
             for corner in ("fl", "fr", "rl", "rr")
         ]
-    if cfg["control"]["external_joint_control"] or cfg["control"]["chassis_control"]:
-        manager = data["controller_manager"]["ros__parameters"]
-        del manager["steering_controller"], manager["wheel_controller"]
-        manager["guarded_joint_controller"] = {
-            "type": "swerve_gazebo_sim/GuardedJointController"
-        }
-        guarded = {"use_sim_time": True}
-        for kind in ("steering", "wheel"):
-            guarded[f"{kind}_joints"] = data[f"{kind}_controller"]["ros__parameters"][
-                "joints"
-            ]
-            del data[f"{kind}_controller"]
-        guarded.update(
-            max_wheel_speed_radps=cfg["control"]["max_wheel_speed"],
-            steering_limit_rad=cfg["control"]["steering_limit"],
-            stopped_wheel_radps=cfg["control"]["stopped_wheel_speed"],
-        )
-        data["guarded_joint_controller"] = {"ros__parameters": guarded}
-    if cfg["control"]["chassis_control"]:
-        manager = data["controller_manager"]["ros__parameters"]
-        del manager["guarded_joint_controller"]
-        manager["chassis_controller"] = {"type": "swerve_gazebo_sim/ChassisController"}
-        low = data.pop("guarded_joint_controller")["ros__parameters"]
-        g, c = cfg["geometry"], cfg["control"]
-        data["chassis_controller"] = {
-            "ros__parameters": {
-                "use_sim_time": True,
-                "steering_joints": low["steering_joints"],
-                "wheel_joints": low["wheel_joints"],
-                "body_frame": prefix + "base_footprint",
-                "odom_frame": c["odom_frame"] or prefix + "odom",
-                "simulation_time_interface": prefix + "execution_clock/simulation_time",
-                "wheelbase_m": g["wheelbase"],
-                "track_m": g["track_width"],
-                "wheel_radius_m": g["wheel_radius"],
-                "max_wheel_speed_mps": c["max_wheel_speed"] * g["wheel_radius"],
-                "max_wheel_accel_mps2": c["max_wheel_acceleration"] * g["wheel_radius"],
-                "max_steer_rate_radps": c["max_steering_rate"],
-                "confirmation_timeout_s": c["mode_switch_timeout"],
-                **safety_parameters(cfg),
-            }
-        }
+    data["chassis_controller"] = {"ros__parameters": parameters}
     return {f"{namespace}/{key}": value for key, value in data.items()}
-
-
-def validate_control(configuration):
-    """Validate controller startup parameters, including hysteresis ordering."""
-    if configuration["chassis_control"] and configuration["external_joint_control"]:
-        raise ValueError(
-            "chassis_control and external_joint_control are mutually exclusive"
-        )
-    if configuration["chassis_control"] and configuration["update_rate"] != 100.0:
-        raise ValueError(
-            "chassis_control currently requires a 100 Hz controller manager"
-        )
-    for key in CONTROL:
-        value = configuration[key]
-        if key in (
-            "publish_odom",
-            "publish_odom_tf",
-            "external_joint_control",
-            "chassis_control",
-        ):
-            if not isinstance(value, bool):
-                raise ValueError(f"{key} must be boolean")
-            continue
-        if key in ("odom_topic", "odom_frame", "odom_child_frame"):
-            if not isinstance(value, str):
-                raise ValueError(f"{key} must be a string")
-            if key == "odom_topic" and not value.strip():
-                raise ValueError("odom_topic must not be empty")
-            if (
-                key != "odom_topic"
-                and value
-                and (
-                    value.startswith("/")
-                    or any(character.isspace() for character in value)
-                )
-            ):
-                raise ValueError(f"{key} must not start with '/' or contain whitespace")
-            continue
-        allow_zero = key in ("mode_dwell_time", "steering_alignment_duration")
-        if (
-            isinstance(value, bool)
-            or not isinstance(value, (int, float))
-            or not math.isfinite(value)
-            or value < 0
-            or (value == 0 and not allow_zero)
-        ):
-            raise ValueError(
-                f"control.{key} must be finite and {'nonnegative' if allow_zero else 'positive'}"
-            )
-    for kind in ("linear", "angular"):
-        if (
-            configuration[f"mode_{kind}_exit_threshold"]
-            >= configuration[f"mode_{kind}_enter_threshold"]
-        ):
-            raise ValueError(f"{kind} exit threshold must be below its enter threshold")
-    if (
-        configuration["mode_switch_timeout"]
-        <= configuration["mode_dwell_time"]
-        + configuration["steering_alignment_duration"]
-    ):
-        raise ValueError(
-            "mode_switch_timeout must exceed dwell plus alignment duration"
-        )

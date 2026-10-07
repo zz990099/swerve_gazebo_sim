@@ -2,32 +2,8 @@
 """Planar rigid-body kinematics. Wheel order is FL, FR, RL, RR."""
 
 import math
-from enum import Enum
 
 import numpy as np
-
-
-class DriveMode(Enum):
-    DIFFERENTIAL = "differential"
-    CRAB = "crab"
-    SPIN = "spin"
-
-
-def select_drive_mode(vx, vy, wz, zero_tolerance=1e-6):
-    """Classify a body command into one explicit chassis mode."""
-    x_is_zero = abs(vx) <= zero_tolerance
-    y_is_zero = abs(vy) <= zero_tolerance
-    yaw_is_zero = abs(wz) <= zero_tolerance
-
-    if x_is_zero and y_is_zero and yaw_is_zero:
-        return None
-    if x_is_zero and y_is_zero:
-        return DriveMode.SPIN
-    if y_is_zero:
-        return DriveMode.DIFFERENTIAL
-    if yaw_is_zero:
-        return DriveMode.CRAB
-    return None
 
 
 class SwerveKinematics:
@@ -51,36 +27,6 @@ class SwerveKinematics:
         for x, y in self.positions:
             matrix.extend(((1.0, 0.0, -y), (0.0, 1.0, x)))
         self._inverse = np.linalg.pinv(np.array(matrix))
-
-    def commands_for_motion(self, vx, vy, wz, current_angles):
-        """Return drive mode, wheel speeds and steering targets for a command."""
-        mode = select_drive_mode(vx, vy, wz)
-
-        if mode is None:
-            return mode, [0.0] * 4, [0.0] * 4
-
-        if mode is DriveMode.DIFFERENTIAL:
-            wheel_speeds, steering_targets = self.inverse(
-                vx,
-                0.0,
-                wz,
-                current_angles,
-            )
-            return mode, wheel_speeds, steering_targets
-
-        if mode is DriveMode.CRAB:
-            wz = 0.0
-        elif mode is DriveMode.SPIN:
-            vx = 0.0
-            vy = 0.0
-
-        wheel_speeds, steering_targets = self.inverse(
-            vx,
-            vy,
-            wz,
-            current_angles,
-        )
-        return mode, wheel_speeds, steering_targets
 
     def inverse(self, vx, vy, wz, current_angles):
         if len(current_angles) != 4 or not all(

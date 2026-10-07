@@ -1,300 +1,386 @@
 // SPDX-License-Identifier: Apache-2.0
 #pragma once
-#include "swerve_gazebo_sim/endpoint_guard.hpp"
-#include "swerve_mppi/execution/profile_runner.hpp"
-#include "swerve_mppi/feedback/feedback.hpp"
-#include <memory>
-
+#include <algorithm>
+#include <array>
+#include <cmath>
+#include <cstdint>
+#include <stdexcept>
 namespace swerve_gazebo_sim {
-namespace core = swerve_mppi;
-struct ChassisPacket {
-  core::CommandEnvelope envelope;
-  bool arm = false;
-  bool malformed = false;
-  double wall_s = -1;
-  std::uint64_t receipt = 0;
+constexpr double pi = 3.14159265358979323846;
+struct Twist {
+  double vx = 0, vy = 0, wz = 0;
 };
-struct ChassisContext {
-  core::ControllerInput input;
-  double stamp_s = -1;
-  bool valid = false;
+struct JointTargets {
+  std::array<double, 4> steering{}, wheels{};
+}; // rad, rad/s
+// Explicit, algorithm-independent chassis modes and mechanical phases.
+enum class Mode : std::uint8_t { DualAckermann, Spin, Crab };
+enum class Phase : std::uint8_t { Fault, Braking, Aligning, Ready };
+enum class Fault : std::uint8_t {
+  None,
+  Disarmed,
+  Clock,
+  Feedback,
+  Command,
+  Timeout,
+  Transition,
+  Write
 };
-// Simulation execution boundary. Called by the joint owner, never a ROS timer
-// pretending that a transported observation is the current physical snapshot.
+struct Config {
+  double wheelbase = .6, track_width = .5, wheel_radius = .1,
+         steering_limit = pi / 2;
+  double max_wheel_speed = 20, max_wheel_acceleration = 40,
+         max_steering_rate = 2.5;
+  double steering_alignment_tolerance = .05, steering_alignment_duration = .05;
+  double mode_switch_timeout = 5, stopped_wheel_speed = .05, cmd_timeout = .5,
+         wall_timeout = .5;
+  double update_rate = 100, drive_steering_limit = .2, max_linear_speed = .8,
+         max_angular_speed = .8;
+  double max_linear_acceleration = .9, max_angular_acceleration = 1.3;
+};
+struct Command {
+  std::uint64_t session = 0, sequence = 0, request = 0, receipt = 0;
+  double stamp = -1, wall = -1;
+  Mode mode = Mode::DualAckermann;
+  Twist velocity, entry;
+  bool reset = false, valid = true;
+};
+inline bool finite(Twist t) {
+  return std::isfinite(t.vx) && std::isfinite(t.vy) && std::isfinite(t.wz);
+}
+inline bool zero(Twist t) { return t.vx == 0 && t.vy == 0 && t.wz == 0; }
+inline bool equal(Twist a, Twist b) {
+  return a.vx == b.vx && a.vy == b.vy && a.wz == b.wz;
+}
+inline bool permitted(Mode m, Twist t) {
+  if (!finite(t))
+    return false;
+  switch (m) {
+  case Mode::DualAckermann:
+    return t.vy == 0 && (t.vx != 0 || t.wz == 0);
+  case Mode::Spin:
+    return t.vx == 0 && t.vy == 0;
+  case Mode::Crab:
+    return t.wz == 0;
+  }
+  return false;
+}
+inline void validate(const Config &c) {
+  const double values[] = {c.wheelbase,
+                           c.track_width,
+                           c.wheel_radius,
+                           c.steering_limit,
+                           c.max_wheel_speed,
+                           c.max_wheel_acceleration,
+                           c.max_steering_rate,
+                           c.steering_alignment_tolerance,
+                           c.steering_alignment_duration,
+                           c.mode_switch_timeout,
+                           c.stopped_wheel_speed,
+                           c.cmd_timeout,
+                           c.wall_timeout,
+                           c.update_rate,
+                           c.drive_steering_limit,
+                           c.max_linear_speed,
+                           c.max_angular_speed,
+                           c.max_linear_acceleration,
+                           c.max_angular_acceleration};
+  for (double v : values)
+    if (!std::isfinite(v) || v <= 0)
+      throw std::invalid_argument(
+          "Positive finite chassis parameters required");
+  if (std::abs(c.steering_limit - pi / 2) > 1e-9 || c.update_rate != 100 ||
+      c.mode_switch_timeout <= c.steering_alignment_duration ||
+      c.drive_steering_limit < c.steering_alignment_tolerance)
+    throw std::invalid_argument("Invalid chassis timing or steering settings");
+}
 class ChassisRuntime {
 public:
-  explicit ChassisRuntime(core::Config config = {})
-      : config_(config), kinematics_(config), runner_(config, .15),
-        guard_(limits(config)) {}
-  void stop(EndpointFault reason = EndpointFault::Disarmed) {
-    fault_ = true;
-    prediction_.reset();
-    pending_.reset();
-    guard_.deactivate(reason);
-    feedback_.fault = true;
-    feedback_.confirmed = false;
-  }
-  bool fault() const { return fault_; }
-  EndpointFault reason() const { return guard_.fault_reason(); }
-  const core::VehicleState &state() const { return state_; }
-  // Diagnostics only: the exact checked profile installed at application.
-  const std::optional<core::VehicleState> &prediction() const {
-    return prediction_;
-  }
-  const core::VehicleState &prediction_start() const {
-    return prediction_start_;
-  }
-  core::TransitionPhase phase() const { return phase_; }
+  explicit ChassisRuntime(Config c = {}) : c_(c) { validate(c_); }
+  Phase phase() const { return phase_; }
+  Fault fault() const { return fault_; }
+  Mode actual_mode() const { return actual_; }
+  Mode requested_mode() const { return requested_; }
+  bool confirmed() const { return phase_ == Phase::Ready; }
   std::uint64_t session() const { return session_; }
   std::uint64_t sequence() const { return sequence_; }
-  double next_tick() const { return next_tick_s_; }
-  core::TimingError timing_error() const { return timing_error_; }
-  core::ExecutionSafetyError safety_error() const { return safety_error_; }
-  unsigned rejection_detail() const { return rejection_detail_; }
-  double context_age() const { return context_age_s_; }
-  double command_receipt_age() const { return command_receipt_age_s_; }
-  double command_source_age() const { return command_source_age_s_; }
-  double command_schedule_slack() const { return command_schedule_slack_s_; }
-  EndpointTargets
-  update(double now, double wall, const EndpointTargets &joints,
-         const ChassisContext &context,
-         const std::optional<ChassisPacket> &packet = std::nullopt) {
-    return update_snapshot(now, wall, joints, context, packet ? &*packet : nullptr);
+  std::uint64_t request() const { return request_; }
+  Twist entry() const { return entry_; }
+  const std::array<double, 4> &entry_angles() const { return accepted_angles_; }
+  void stop(Fault f = Fault::Disarmed) {
+    fault_ = f;
+    phase_ = Phase::Fault;
+    velocity_ = {};
+    limited_ = {};
   }
-  // Immutable buffer snapshots avoid copying a full task at each hardware tick.
-  EndpointTargets update_snapshot(double now, double wall, const EndpointTargets &joints,
-                                  const ChassisContext &context,
-                                  const ChassisPacket *packet = nullptr) {
-    context_age_s_ = context.valid && std::isfinite(context.stamp_s) ? now - context.stamp_s : -1;
+  JointTargets stopped_targets(const JointTargets &s) const {
+    JointTargets out;
+    for (std::size_t i = 0; i < 4; ++i)
+      out.steering[i] =
+          std::isfinite(s.steering[i])
+              ? std::clamp(s.steering[i], -c_.steering_limit, c_.steering_limit)
+              : 0;
+    return out;
+  }
+  Twist forward(const JointTargets &s) const {
+    Twist out;
+    for (std::size_t i = 0; i < 4; ++i) {
+      const double x = (i < 2 ? 1 : -1) * c_.wheelbase / 2,
+                   y = (i % 2 == 0 ? 1 : -1) * c_.track_width / 2;
+      const double vx = s.wheels[i] * c_.wheel_radius * std::cos(s.steering[i]),
+                   vy = s.wheels[i] * c_.wheel_radius * std::sin(s.steering[i]);
+      out.vx += vx / 4;
+      out.vy += vy / 4;
+      out.wz += (-y * vx + x * vy) /
+                (c_.wheelbase * c_.wheelbase + c_.track_width * c_.track_width);
+    }
+    return out;
+  }
+  JointTargets inverse(Twist t, const std::array<double, 4> &current) const {
+    JointTargets out;
+    out.steering = current;
+    for (std::size_t i = 0; i < 4; ++i) {
+      const double x = (i < 2 ? 1 : -1) * c_.wheelbase / 2,
+                   y = (i % 2 == 0 ? 1 : -1) * c_.track_width / 2;
+      const double vx = t.vx - t.wz * y, vy = t.vy + t.wz * x,
+                   speed = std::hypot(vx, vy) / c_.wheel_radius;
+      if (speed < 1e-12)
+        continue;
+      double best = 1e100;
+      const double raw = std::atan2(vy, vx);
+      for (int k = -1; k <= 1; ++k) {
+        const double a = raw + k * pi;
+        if (a < -c_.steering_limit - 1e-12 || a > c_.steering_limit + 1e-12)
+          continue;
+        if (std::abs(a - current[i]) < best) {
+          best = std::abs(a - current[i]);
+          out.steering[i] =
+              std::clamp(a, -c_.steering_limit, c_.steering_limit);
+          out.wheels[i] = k == 0 ? speed : -speed;
+        }
+      }
+    }
+    double scale = 1;
+    for (double w : out.wheels)
+      scale = std::max(scale, std::abs(w) / c_.max_wheel_speed);
+    for (double &w : out.wheels)
+      w /= scale;
+    return out;
+  }
+  JointTargets update(double now, double wall, const JointTargets &measured,
+                      const Command *packet = nullptr) {
     const bool clock = std::isfinite(now) && now >= 0 && std::isfinite(wall) &&
                        wall >= 0 && (last_now_ < 0 || now >= last_now_) &&
                        (last_wall_ < 0 || wall >= last_wall_);
-    const double elapsed = clock && last_now_ >= 0 ? now - last_now_ : 0;
-    if (!clock) {
-      stop(EndpointFault::Clock);
-      if (std::isfinite(now) && last_now_ >= 0 && now < last_now_)
-        state_.pose = {};
+    const double dt = clock && last_now_ >= 0 ? now - last_now_ : 0;
+    const bool gap = last_wall_ >= 0 && wall - last_wall_ > c_.wall_timeout;
+    last_now_ = now;
+    last_wall_ = wall;
+    if (!clock || dt > .03 || gap) {
+      stop(Fault::Clock);
+      return stopped_targets(measured);
     }
-    // Encoder odometry, not physical ground truth. Gaps are not extrapolated.
-    state_.steering_angles = joints.steering;
     for (std::size_t i = 0; i < 4; ++i)
-      state_.wheel_speeds[i] = joints.wheels[i] * config_.wheel_radius_m;
-    state_.velocity =
-        kinematics_.forward(state_.wheel_speeds, state_.steering_angles);
-    state_.stamp_s = now;
-    apply_feedback(now);
-    const bool valid = core::check_model_feedback(state_, config_).status ==
-                       core::FeedbackStatus::Valid;
-    if (!valid)
-      stop(EndpointFault::Feedback);
-    if (valid && elapsed > 0 && elapsed <= .03) {
-      const double yaw = state_.pose.yaw + .5 * state_.velocity.wz * elapsed;
-      state_.pose.x += (std::cos(yaw) * state_.velocity.vx -
-                        std::sin(yaw) * state_.velocity.vy) *
-                       elapsed;
-      state_.pose.y += (std::sin(yaw) * state_.velocity.vx +
-                        std::cos(yaw) * state_.velocity.vy) *
-                       elapsed;
-      state_.pose.yaw =
-          core::wrap_angle(state_.pose.yaw + state_.velocity.wz * elapsed);
-    } else if (elapsed > .03) {
-      stop(EndpointFault::SimulationDeadline);
+      if (!std::isfinite(measured.steering[i]) ||
+          !std::isfinite(measured.wheels[i]) ||
+          std::abs(measured.steering[i]) > c_.steering_limit + .05) {
+        stop(Fault::Feedback);
+        return stopped_targets(measured);
+      }
+    if (!initialized_) {
+      sent_ = stopped_targets(measured);
+      initialized_ = true;
     }
-    last_now_ = std::isfinite(now) ? now : -1;
-    last_wall_ = std::isfinite(wall) ? wall : -1;
-    // Check the independent guard BEFORE accepting new commands/recovery.
-    auto targets = guard_.update(now, wall, joints);
-    if (!fault_ && guard_.fault())
-      stop(guard_.fault_reason());
-    bool new_arm = false;
+    if (phase_ != Phase::Fault && (now - stamp_ > c_.cmd_timeout ||
+                                   wall - receipt_wall_ > c_.wall_timeout))
+      stop(Fault::Timeout);
     if (packet && packet->receipt != receipt_) {
       receipt_ = packet->receipt;
-      command_schedule_slack_s_ = packet->envelope.execute_at_s - now;
       const auto &p = *packet;
-      if (!clock || !valid || p.malformed || !std::isfinite(p.wall_s) ||
-          p.wall_s > wall || wall - p.wall_s >= .15 ||
-          !p.envelope.command.command) {
-        rejection_detail_ = 1;
-        stop(EndpointFault::CommandRejected);
-      } else if (p.arm) {
-        if (fault_ && arm(p, now, wall, context)) {
-          pending_ = p;
-          new_arm = true;
-        } else {
-          stop(EndpointFault::CommandRejected);
+      if (!p.valid || !p.session || !p.sequence || !std::isfinite(p.stamp) ||
+          p.stamp < 0 || p.stamp > now + 1e-9 ||
+          now - p.stamp > c_.cmd_timeout || !std::isfinite(p.wall) ||
+          p.wall > wall || wall - p.wall > c_.wall_timeout ||
+          !permitted(p.mode, p.velocity) || !permitted(p.mode, p.entry))
+        stop(Fault::Command);
+      else if (p.reset) {
+        if (p.session <= session_ || !zero(p.velocity) || !zero(p.entry) ||
+            p.request != 0 || p.mode != actual_ || !stopped(measured))
+          stop(Fault::Command);
+        else {
+          session_ = p.session;
+          sequence_ = p.sequence;
+          request_ = 0;
+          requested_ = actual_;
+          entry_ = {};
+          velocity_ = {};
+          limited_ = {};
+          sent_ = stopped_targets(measured);
+          alignment_ = measured.steering;
+          accepted_angles_ = alignment_;
+          explicit_transition_ = false;
+          phase_ = Phase::Ready;
+          fault_ = Fault::None;
+          stamp_ = p.stamp;
+          receipt_wall_ = p.wall;
         }
-      } else if (!fault_) {
-        const auto &e = p.envelope;
-        if (e.session_id != session_ || e.sequence <= sequence_ ||
-            (pending_ && e.sequence <= pending_->envelope.sequence) ||
-            !std::isfinite(e.execute_at_s) ||
-            e.execute_at_s > next_tick_s_ + 1e-9 || e.valid_until_s < now ||
-            e.issued_at_s > now + 1e-9) {
-          rejection_detail_ = 2;
-          stop(EndpointFault::CommandRejected);
-        } else {
-          pending_ = p;
+      } else if (phase_ != Phase::Fault) {
+        if (p.session != session_ || p.sequence <= sequence_ ||
+            p.stamp < stamp_ || p.request < request_)
+          stop(Fault::Command);
+        else if (p.request > request_) {
+          if (phase_ != Phase::Ready || !zero(p.velocity))
+            stop(Fault::Command);
+          else {
+            request_ = p.request;
+            requested_ = p.mode;
+            entry_ = p.entry;
+            Twist intent = bounded(entry_);
+            if (zero(intent))
+              intent =
+                  requested_ == Mode::Spin ? Twist{0, 0, 1} : Twist{1, 0, 0};
+            alignment_ = inverse(intent, measured.steering).steering;
+            accepted_angles_ = alignment_;
+            explicit_transition_ = true;
+            begin(now);
+            velocity_ = {};
+          }
+        } else if (p.mode != requested_ || !equal(p.entry, entry_) ||
+                   (explicit_transition_ && !confirmed() && !zero(p.velocity)))
+          stop(Fault::Command);
+        else
+          velocity_ = bounded(p.velocity);
+        if (phase_ != Phase::Fault) {
+          sequence_ = p.sequence;
+          stamp_ = p.stamp;
+          receipt_wall_ = p.wall;
         }
       }
     }
-    if (!fault_ &&
-        (!context.valid || context.stamp_s > now + 1e-9 ||
-         !std::isfinite(context.stamp_s) || now - context.stamp_s > .15)) {
-      rejection_detail_ = 3;
-      stop(EndpointFault::CommandRejected);
+    if (phase_ == Phase::Fault) {
+      sent_ = stopped_targets(measured);
+      return sent_;
     }
-    if (!fault_ && (new_arm || now + 1e-9 >= next_tick_s_)) {
-      if (!pending_ || now > next_tick_s_ + 1e-9 ||
-          wall - pending_->wall_s >= .15) {
-        stop(EndpointFault::SimulationDeadline);
+    if (dt <= 0)
+      return sent_;
+    if (phase_ == Phase::Ready) {
+      if (zero(velocity_)) {
+        ramp_wheels({}, dt);
+        limited_ = {};
+        return sent_;
+      }
+      const Twist next = slew(velocity_, dt);
+      const auto target = inverse(next, measured.steering);
+      if (error(target.steering, measured.steering) > c_.drive_steering_limit) {
+        alignment_ = inverse(velocity_, measured.steering).steering;
+        begin(now);
       } else {
-        command_receipt_age_s_ = wall - pending_->wall_s;
-        command_source_age_s_ = now - pending_->envelope.source_stamp_s;
-        auto latest = context.input;
-        latest.vehicle = state_;
-        auto result = executor_->update(pending_->envelope, latest, now);
-        sequence_ = pending_->envelope.sequence;
-        feedback_ = result.execution.feedback;
-        feedback_stamp_ = now;
-        phase_ = result.execution.phase;
-        timing_error_ = result.timing_error;
-        safety_error_ = result.safety_error;
-        pending_.reset();
-        if (!runner_.install(result, now, wall)) {
-          rejection_detail_ = 4;
-          stop(EndpointFault::CommandRejected);
-        } else {
-          prediction_start_ = result.actuation->start();
-          prediction_ = result.actuation->endpoint().state;
-          next_tick_s_ = now + config_.dt_s;
-        }
+        ramp_wheels(target.wheels, dt);
+        ramp_steering(target.steering, dt);
+        limited_ = next;
+        return sent_;
       }
     }
-    if (!fault_) {
-      const auto sample = runner_.sample(now, wall);
-      if (!sample) {
-        stop(EndpointFault::SimulationDeadline);
-      } else {
-        EndpointPacket p;
-        p.receipt = ++sample_sequence_;
-        p.received_wall_s = wall;
-        p.data = {double(session_),
-                  double(sample_sequence_),
-                  new_arm ? 1.0 : 0.0,
-                  now,
-                  now + .025,
-                  sample->steering_angles[0],
-                  sample->steering_angles[1],
-                  sample->steering_angles[2],
-                  sample->steering_angles[3],
-                  sample->wheel_angular_speeds[0],
-                  sample->wheel_angular_speeds[1],
-                  sample->wheel_angular_speeds[2],
-                  sample->wheel_angular_speeds[3],
-                  1};
-        // Arm is an explicit zero-wheel command. A sampled Hold profile may
-        // contain tiny measured encoder residuals at t=0; they are feedback,
-        // not authorization to drive. arm() already verified stopped feedback.
-        if (new_arm)
-          for (std::size_t i = 9; i < 13; ++i)
-            p.data[i] = 0;
-        targets = guard_.update(now, wall, joints, p);
-        if (guard_.fault())
-          stop(guard_.fault_reason());
-      }
+    if (now - transition_start_ > c_.mode_switch_timeout) {
+      stop(Fault::Transition);
+      sent_ = stopped_targets(measured);
+      return sent_;
     }
-    apply_feedback(now);
-    if (fault_)
-      targets = guard_.update(now, wall, joints);
-    return targets;
+    if (phase_ == Phase::Braking) {
+      ramp_wheels({}, dt);
+      limited_ = {};
+      if (!stopped(measured) || max_abs(sent_.wheels) > 1e-12)
+        return sent_;
+      phase_ = Phase::Aligning;
+    }
+    if (!stopped(measured)) {
+      phase_ = Phase::Braking;
+      aligned_since_ = -1;
+      return sent_;
+    }
+    ramp_steering(alignment_, dt);
+    if (error(alignment_, measured.steering) <=
+        c_.steering_alignment_tolerance) {
+      if (aligned_since_ < 0)
+        aligned_since_ = now;
+      if (now - aligned_since_ + 1e-9 >= c_.steering_alignment_duration) {
+        actual_ = requested_;
+        phase_ = Phase::Ready;
+        explicit_transition_ = false;
+      }
+    } else
+      aligned_since_ = -1;
+    return sent_;
   }
 
 private:
-  unsigned rejection_detail_ = 0;
-  static EndpointLimits limits(const core::Config &c) {
-    EndpointLimits l;
-    l.max_wheel_speed_radps = c.max_wheel_speed_mps / c.wheel_radius_m;
-    l.steering_limit_rad = c.steering_limit_rad;
-    l.stopped_wheel_radps = c.stopped_wheel_speed_mps / c.wheel_radius_m;
-    return l;
+  static double max_abs(const std::array<double, 4> &a) {
+    double v = 0;
+    for (double x : a)
+      v = std::max(v, std::abs(x));
+    return v;
   }
-  void apply_feedback(double now) {
-    state_.actual_mode = feedback_.actual_mode;
-    state_.mode_confirmed = feedback_.confirmed && !fault_;
-    state_.mode_fault = feedback_.fault || fault_;
-    state_.mode_request_id = feedback_.request_id;
-    state_.accepted_mode_request = feedback_.accepted_mode_request;
-    state_.time_in_mode_s =
-        feedback_.time_in_mode_s + std::max(0.0, now - feedback_stamp_);
+  static double error(const std::array<double, 4> &a,
+                      const std::array<double, 4> &b) {
+    double v = 0;
+    for (std::size_t i = 0; i < 4; ++i)
+      v = std::max(v, std::abs(a[i] - b[i]));
+    return v;
   }
-  bool arm(const ChassisPacket &p, double now, double wall,
-           const ChassisContext &context) {
-    const auto &e = p.envelope;
-    const auto &c = *e.command.command;
-    if (e.session_id <= session_ || e.session_id >= (std::uint64_t{1} << 53) ||
-        e.sequence == 0 || c.mode_request || c.target_velocity.vx != 0 ||
-        c.target_velocity.vy != 0 || c.target_velocity.wz != 0 ||
-        !context.valid || !e.source_task ||
-        !e.source_task->matches(context.input) ||
-        !core::is_stopped(state_, config_))
-      return false;
-    if (c.mode != core::DriveMode::DualAckermann &&
-        c.mode != core::DriveMode::Crab && c.mode != core::DriveMode::Spin)
-      return false;
-    // Startup requires canonical geometry. Later recovery keeps the last mode
-    // and stopped measured steering; only an explicit request may change mode.
-    const auto canonical = core::DriveModel(config_).steering_for_mode(
-        c.mode, state_.steering_angles);
-    if (session_ != 0 && c.mode != state_.actual_mode)
-      return false;
-    if (session_ == 0) {
-      for (std::size_t i = 0; i < 4; ++i)
-        if (std::abs(canonical[i] - state_.steering_angles[i]) >
-            config_.steering_tolerance_rad)
-          return false;
+  bool stopped(const JointTargets &s) const {
+    return max_abs(s.wheels) <= c_.stopped_wheel_speed;
+  }
+  Twist bounded(Twist t) const {
+    const double scale = std::max({1., std::abs(t.vx) / c_.max_linear_speed,
+                                   std::abs(t.vy) / c_.max_linear_speed,
+                                   std::abs(t.wz) / c_.max_angular_speed});
+    t = {t.vx / scale, t.vy / scale, t.wz / scale};
+    const double d = std::hypot(t.vx, t.vy);
+    if (d > c_.max_linear_speed) {
+      t.vx *= c_.max_linear_speed / d;
+      t.vy *= c_.max_linear_speed / d;
     }
-    auto recovered = state_;
-    recovered.actual_mode = c.mode;
-    recovered.mode_fault = false;
-    recovered.mode_confirmed = true;
-    recovered.accepted_mode_request.reset();
-    recovered.time_in_mode_s = 0;
-    if (executor_)
-      executor_->reset(recovered, e.session_id);
-    else
-      executor_ =
-          std::make_unique<core::TimedExecutor>(config_, e.session_id, c.mode);
-    runner_.reset(recovered);
-    state_ = recovered;
-    feedback_ = {c.mode, true,        false, recovered.mode_request_id,
-                 0,      std::nullopt};
-    feedback_stamp_ = now;
-    session_ = e.session_id;
-    sequence_ = 0;
-    rejection_detail_ = 0;
-    next_tick_s_ = now;
-    fault_ = false;
-    (void)wall;
-    return true;
+    return t;
   }
-  double context_age_s_ = -1, command_receipt_age_s_ = -1,
-         command_source_age_s_ = -1, command_schedule_slack_s_ = -1;
-  core::Config config_;
-  core::Kinematics kinematics_;
-  core::ProfileRunner runner_;
-  EndpointGuard guard_;
-  std::unique_ptr<core::TimedExecutor> executor_;
-  core::VehicleState state_;
-  core::VehicleState prediction_start_;
-  std::optional<core::VehicleState> prediction_;
-  core::ModeFeedback feedback_;
-  core::TransitionPhase phase_ = core::TransitionPhase::Fault;
-  core::TimingError timing_error_ = core::TimingError::None;
-  core::ExecutionSafetyError safety_error_ = core::ExecutionSafetyError::None;
-  std::optional<ChassisPacket> pending_;
-  bool fault_ = true;
-  std::uint64_t session_ = 0, sequence_ = 0, sample_sequence_ = 0, receipt_ = 0;
-  double last_now_ = -1, last_wall_ = -1, next_tick_s_ = -1,
-         feedback_stamp_ = 0;
+  Twist slew(Twist t, double dt) const {
+    const double dx = t.vx - limited_.vx, dy = t.vy - limited_.vy,
+                 dw = t.wz - limited_.wz;
+    const double linear = std::hypot(dx, dy), angular = std::abs(dw);
+    double scale = 1;
+    if (linear > 0)
+      scale = std::min(scale, c_.max_linear_acceleration * dt / linear);
+    if (angular > 0)
+      scale = std::min(scale, c_.max_angular_acceleration * dt / angular);
+    return {limited_.vx + scale * dx, limited_.vy + scale * dy,
+            limited_.wz + scale * dw};
+  }
+  void begin(double now) {
+    phase_ = Phase::Braking;
+    transition_start_ = now;
+    aligned_since_ = -1;
+  }
+  void ramp_wheels(const std::array<double, 4> &t, double dt) {
+    for (std::size_t i = 0; i < 4; ++i)
+      sent_.wheels[i] +=
+          std::clamp(t[i] - sent_.wheels[i], -c_.max_wheel_acceleration * dt,
+                     c_.max_wheel_acceleration * dt);
+  }
+  void ramp_steering(const std::array<double, 4> &t, double dt) {
+    for (std::size_t i = 0; i < 4; ++i)
+      sent_.steering[i] +=
+          std::clamp(t[i] - sent_.steering[i], -c_.max_steering_rate * dt,
+                     c_.max_steering_rate * dt);
+  }
+  Config c_;
+  JointTargets sent_;
+  bool initialized_ = false, explicit_transition_ = false;
+  Phase phase_ = Phase::Fault;
+  Fault fault_ = Fault::Disarmed;
+  Mode actual_ = Mode::DualAckermann, requested_ = Mode::DualAckermann;
+  Twist velocity_, entry_, limited_;
+  std::array<double, 4> alignment_{}, accepted_angles_{};
+  std::uint64_t session_ = 0, sequence_ = 0, request_ = 0, receipt_ = 0;
+  double last_now_ = -1, last_wall_ = -1, stamp_ = -1, receipt_wall_ = -1,
+         transition_start_ = 0, aligned_since_ = -1;
 };
 } // namespace swerve_gazebo_sim

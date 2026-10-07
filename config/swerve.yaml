@@ -1,9 +1,5 @@
-# Shared model and controller configuration. All lengths are metres, masses kg,
-# angles radians and time seconds unless noted. These are startup values:
-# pass config:=/absolute/path/custom.yaml and restart launch after editing.
-# Geometry is used by Xacro and kinematics. Control values configure the Python
-# controller; update_rate and joint limits also feed ros2_control / the URDF.
-# Numeric values must be finite and positive, except two durations allowing zero.
+# Startup-only model and chassis configuration. Unknown or missing keys are errors.
+# No planner, path, obstacle or algorithm settings belong in this file.
 geometry:
   # Front-to-rear steering-axis separation; must exceed twice wheel_radius.
   wheelbase: 0.60
@@ -27,102 +23,44 @@ geometry:
   steering_mass: 0.2
 
 control:
-  # true: disable cmd_vel mode inference, joint publishers and all internal ramps.
-  # An external MPPI adapter owns both command topics and its independent watchdog.
-  # Encoder odometry/TF and feedback diagnostics remain available.
-  external_joint_control: false
-  # Explicit body velocity/mode protocol. Mutually exclusive with external_joint_control.
-  # Requires -DSWERVE_BUILD_CHASSIS_CONTROLLER=ON and installed MPPI core 0.20.2.
-  chassis_control: false
-  # Hz; positive integer shared by the Python control timer and controller_manager.
-  # The bundled world steps physics at 200 Hz; increasing this does not change it.
+  # Fixed ros2_control update frequency; bundled physics runs at 200 Hz.
   update_rate: 100.0
-  # Maximum command age, s of simulation time. Zero-stamped commands use receipt
-  # time. Expired, invalid or explicit zero commands stop drive immediately.
-  # This watchdog pauses when simulation time pauses.
+  # Maximum command age in simulation time and silence in steady wall time (s).
+  # Expiry latches a fault, commands zero wheels and holds measured steering.
   cmd_timeout: 0.5
-  # Maximum measured joint-state age, s. Missing/stale feedback stops drive,
-  # invalidates the active mode and requires a new mode-entry interlock.
+  wall_timeout: 0.5
+  # Encoder odometry maximum observation gap/age (s).
   feedback_timeout: 0.25
-
-  # rad/s per drive wheel, also used in URDF and ros2_control velocity limits.
-  # If any target exceeds this, all wheel targets are scaled by the same factor.
-  # With the default radius, aligned pure translation is limited to about
-  # 20 * 0.10 = 2 m/s; turning also consumes the wheel speed budget.
+  # Drive joint angular limits: rad/s and rad/s^2. Normal braking uses this ramp.
   max_wheel_speed: 20.0
-  # rad/s^2 per drive wheel: rate limit on wheel velocity commands during active
-  # drive, applied to acceleration and deceleration. Stop/interlock commands
-  # bypass this ramp and command zero immediately; physics may take time to stop.
-  # For fixed, aligned steering in pure translation, 40 * 0.10 = 4 m/s^2.
-  # This is NOT a general chassis linear/yaw acceleration bound: steering motion
-  # changes the body velocity direction. There is no separate max_linear_acceleration
-  # or max_angular_acceleration parameter in the current controller.
   max_wheel_acceleration: 40.0
-  # rad/s per steering joint: rate limit on commanded steering-angle changes,
-  # including alignment and return to zero, and the URDF steering velocity limit.
-  # This is steering speed, not drive-wheel speed or chassis yaw rate.
-  # There is no steering acceleration or jerk limit.
+  # Steering command slew (rad/s) and mechanical travel (+/-rad).
   max_steering_rate: 2.5
-  # rad; maximum measured steering error for mode entry and active spin/crab.
-  # All four joints must satisfy it. Active differential driving does not reapply
-  # this alignment gate as Ackermann steering follows the command.
-  steering_alignment_tolerance: 0.05
-
-  # m/s; each vx/vy component enters/leaves the nonzero classification at these
-  # thresholds. Exit must be lower than enter to provide deadband hysteresis.
-  mode_linear_enter_threshold: 0.01
-  mode_linear_exit_threshold: 0.005
-  # rad/s; equivalent hysteresis thresholds for wz, not a maximum yaw speed.
-  mode_angular_enter_threshold: 0.01
-  mode_angular_exit_threshold: 0.005
-  # s; requested mode must remain stable this long while braking before steering
-  # alignment begins. Zero disables dwell; it does not disable the stop interlock.
-  mode_dwell_time: 0.10
-  # s; all measured steering joints must stay aligned continuously before drive
-  # starts. Zero allows immediate activation once alignment is measured.
-  steering_alignment_duration: 0.05
-  # s; total deadline for a pending transition, including retargets. Must exceed
-  # mode_dwell_time + steering_alignment_duration. Expiry latches a stopped fault;
-  # send a zero command to reset it. Allow time for braking and large steering moves.
-  mode_switch_timeout: 5.0
-  # rad/s; all measured drive-wheel speeds must be at or below this before
-  # steering changes during a transition. This is a stop-detection tolerance.
-  stopped_wheel_speed: 0.05
-  # Hz; drive_status DiagnosticArray rate, independent of the control update rate.
-  status_publish_rate: 10.0
-
-  # rad; symmetric steering travel +/- pi/2. This release requires exactly pi/2:
-  # it is not a continuously rotating steering model or a freely tunable range.
   steering_limit: 1.5707963267948966
-  # Publish wheel/steering-kinematic Odometry messages. Pose integration and
-  # feedback processing continue when disabled; TF has its own independent switch.
+  # Body target limits (m/s, rad/s) and target slew (m/s^2, rad/s^2).
+  # These bound requested twist; actual acceleration also depends on steering,
+  # contact and actuator response. They are not measured physical guarantees.
+  max_linear_speed: 0.8
+  max_angular_speed: 0.8
+  max_linear_acceleration: 0.9
+  max_angular_acceleration: 1.3
+  # Larger steering changes stop and align; smaller changes may occur while moving.
+  drive_steering_limit: 0.2
+  # All measured joints must stay within this angular error for this dwell (s).
+  steering_alignment_tolerance: 0.05
+  steering_alignment_duration: 0.05
+  # Whole braking/alignment timeout (s), never renewed by repeated requests.
+  mode_switch_timeout: 5.0
+  # Measured wheel stop threshold (rad/s). Encoder stop does not detect body slip.
+  stopped_wheel_speed: 0.05
+  # Odometry and TF switches are independent; integration always continues.
   publish_odom: true
-  # Relative names expand under the robot namespace; absolute names stay global.
   odom_topic: odom
-  # Publish odometry TF. Disable if another estimator owns the same transform.
-  # This is independent of publish_odom; either output can be enabled on its own.
   publish_odom_tf: true
-  # Shared Odometry header.frame_id / TF parent and child_frame_id / TF child.
-  # Empty values select <prefix>odom and <prefix>base_footprint. Explicit names
-  # are used exactly as supplied: no automatic prefix or coordinate conversion.
-  # The child should correspond to the robot's physical base frame to connect TF.
+  # Empty frame names resolve to <prefix>odom and <prefix>base_footprint.
+  # Overrides rename frames only; they perform no coordinate transformation.
   odom_frame: ""
   odom_child_frame: ""
-  # Fixed nominal diagonals for planar x/y/yaw covariance, not an estimator:
-  # pose uses m^2 for x/y and rad^2 for yaw; other unsupported axes use 1e6.
+  # Fixed x/y/yaw covariance diagonals, not sensor noise or calibrated uncertainty.
   pose_variance: 0.02
-  # Equivalent fixed planar velocity covariance: (m/s)^2 for vx/vy and
-  # (rad/s)^2 for wz. This value does not change simulation sensor noise.
   twist_variance: 0.02
-
-# Collision geometry is independent of motion limits. "auto" covers the chassis
-# box and the full steering sweep of all wheel collision cylinders, rounded
-# outwards to centimetres. A numeric radius must cover that same geometry.
-# The margin is additional clearance; it cannot replace physical geometry.
-safety:
-  robot_radius: auto
-  collision_margin: 0.05
-
-# Not configurable here: body-level speed/acceleration caps, steering acceleration,
-# joint torque limits, tire friction, suspension or world physics step. Some model
-# properties are fixed in the Xacro/world; adding unrecognised YAML keys is rejected.
