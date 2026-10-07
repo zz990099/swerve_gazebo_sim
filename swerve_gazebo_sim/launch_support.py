@@ -27,11 +27,11 @@ from launch_ros.actions import Node
 from launch import LaunchDescription
 
 from .bringup import (
-    OBSERVER_DEFAULTS,
     ODOMETRY_DEFAULTS,
     controller_config,
     load_config,
     names,
+    validate_control,
 )
 
 PACKAGE_NAME = "swerve_gazebo_sim"
@@ -80,8 +80,6 @@ def spawn_setup(context, variant):
     configuration["control"].update(
         odometry_parameters(context, configuration["control"])
     )
-    from .bringup import validate_control
-
     validate_control(configuration["control"])
 
     controller_template = os.path.join(
@@ -181,7 +179,8 @@ def spawn_setup(context, variant):
         output="screen",
         arguments=[
             "joint_state_broadcaster",
-            "chassis_controller",
+            "steering_controller",
+            "wheel_controller",
             "--controller-manager",
             f"{namespace}/controller_manager",
             "--controller-manager-timeout",
@@ -192,7 +191,7 @@ def spawn_setup(context, variant):
     )
 
     controller_node_parameters = {
-        key: configuration["control"][key] for key in OBSERVER_DEFAULTS
+        key: configuration["control"][key] for key in configuration["control"]
     }
     for parameter_name in ("wheelbase", "track_width", "wheel_radius"):
         controller_node_parameters[parameter_name] = configuration["geometry"][
@@ -245,6 +244,12 @@ def spawn_setup(context, variant):
             return [swerve_controller]
         return [EmitEvent(event=Shutdown(reason="Controller activation failed"))]
 
+    controller_exit_handler = RegisterEventHandler(
+        OnProcessExit(
+            target_action=swerve_controller,
+            on_exit=[EmitEvent(event=Shutdown(reason="Chassis node exited"))],
+        )
+    )
     cleanup_handler = RegisterEventHandler(
         OnShutdown(on_shutdown=remove_temporary_controller_file)
     )
@@ -263,6 +268,7 @@ def spawn_setup(context, variant):
 
     return [
         cleanup_handler,
+        controller_exit_handler,
         spawn_handler,
         controller_handler,
         robot_state_publisher,

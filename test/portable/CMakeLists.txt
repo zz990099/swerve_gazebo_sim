@@ -1,5 +1,0 @@
-add_executable(chassis_runtime_tests ../chassis_runtime_tests.cpp)
-target_include_directories(chassis_runtime_tests PRIVATE ../../include)
-target_compile_features(chassis_runtime_tests PRIVATE cxx_std_17)
-target_compile_options(chassis_runtime_tests PRIVATE -Wall -Wextra -Wpedantic -Werror)
-add_test(NAME chassis_runtime COMMAND chassis_runtime_tests)

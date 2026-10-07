@@ -3,8 +3,6 @@
 
 import math
 
-import numpy as np
-
 
 class SwerveKinematics:
     def __init__(
@@ -23,10 +21,6 @@ class SwerveKinematics:
             (-wheelbase / 2, track_width / 2),
             (-wheelbase / 2, -track_width / 2),
         )
-        matrix = []
-        for x, y in self.positions:
-            matrix.extend(((1.0, 0.0, -y), (0.0, 1.0, x)))
-        self._inverse = np.linalg.pinv(np.array(matrix))
 
     def inverse(self, vx, vy, wz, current_angles):
         if len(current_angles) != 4 or not all(
@@ -59,15 +53,15 @@ class SwerveKinematics:
             or not all(math.isfinite(v) for v in (*wheel_speeds, *steering_angles))
         ):
             raise ValueError("Expected four finite wheel speeds and steering angles")
-        velocities = []
-        for speed, angle in zip(wheel_speeds, steering_angles):
-            velocities.extend(
-                (
-                    speed * self.radius * math.cos(angle),
-                    speed * self.radius * math.sin(angle),
-                )
-            )
-        return tuple(float(v) for v in self._inverse @ np.array(velocities))
+        vx = vy = wz = 0.0
+        denominator = sum(x * x + y * y for x, y in self.positions)
+        for (x, y), speed, angle in zip(self.positions, wheel_speeds, steering_angles):
+            ux = speed * self.radius * math.cos(angle)
+            uy = speed * self.radius * math.sin(angle)
+            vx += ux / 4
+            vy += uy / 4
+            wz += (-y * ux + x * uy) / denominator
+        return vx, vy, wz
 
 
 def integrate_pose(pose, twist, dt):

@@ -33,12 +33,10 @@ def main():
     truth = GazeboTruth("/ground_truth/odom", args.gazebo_version)
     command = ChassisCommand()
     command.header.frame_id = "base_footprint"
-    command.session_id = 1
 
     def tick(publish=True):
         if publish:
             command.header.stamp = node.get_clock().now().to_msg()
-            command.sequence += 1
             publisher.publish(command)
         rclpy.spin_once(node, timeout_sec=0.005)
         time.sleep(0.005)
@@ -83,17 +81,9 @@ def main():
             publish=False,
         )
         wait(lambda: max(map(abs, state[0].wheel_speeds)) < 0.05, publish=False)
-        command.reset = True
-        # Reset is a one-shot transaction; retries use a strictly newer session.
-        for _ in range(20):
-            command.session_id += 1
-            tick()
-            for _ in range(10):
-                tick(False)
-            if state[0].confirmed and state[0].session_id == command.session_id:
-                break
-        assert state[0].confirmed, state[0]
-        command.reset = False
+        # A new zero request also recovers from startup feedback faults.
+        command.request_id = state[0].request_id + 1
+        wait(lambda: state[0].confirmed and state[0].request_id == command.request_id)
         for target in (1, 2, 0, 2, 1, 0):
             command.request_id += 1
             command.mode = target
@@ -128,8 +118,11 @@ def main():
         run(0.6)
         wait(lambda: state[0].fault != 0, publish=False)
         wait(lambda: max(map(abs, state[0].wheel_speeds)) < 0.05, publish=False)
+        command.request_id += 1
+        set_twist(command.velocity, (0.0, 0.0, 0.0))
+        wait(lambda: state[0].confirmed and state[0].request_id == command.request_id)
         print(
-            "PASS: six mode transitions, physical motion, zero hold, command loss",
+            "PASS: six mode transitions, physical motion, zero hold, command loss and recovery",
             flush=True,
         )
     finally:

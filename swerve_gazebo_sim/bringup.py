@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
-"""Strict current chassis configuration shared by model, plugin and launch."""
+"""Strict current chassis configuration shared by model, Python controller and launch."""
 
 import math
 import re
@@ -20,24 +20,26 @@ GEOMETRY = (
     "steering_mass",
 )
 
-CHASSIS_PARAMETERS = (
-    "steering_limit",
-    "max_wheel_speed",
-    "max_wheel_acceleration",
-    "max_steering_rate",
-    "steering_alignment_tolerance",
-    "steering_alignment_duration",
-    "mode_switch_timeout",
-    "stopped_wheel_speed",
-    "cmd_timeout",
-    "wall_timeout",
-    "update_rate",
-    "drive_steering_limit",
-    "max_linear_speed",
-    "max_angular_speed",
-    "max_linear_acceleration",
-    "max_angular_acceleration",
-)
+CHASSIS_DEFAULTS = {
+    "steering_limit": math.pi / 2,
+    "max_wheel_speed": 20.0,
+    "max_wheel_acceleration": 40.0,
+    "max_steering_rate": 2.5,
+    "steering_alignment_tolerance": 0.05,
+    "steering_alignment_duration": 0.05,
+    "mode_switch_timeout": 5.0,
+    "stopped_wheel_speed": 0.05,
+    "cmd_timeout": 0.5,
+    "wall_timeout": 0.5,
+    "update_rate": 100.0,
+    "drive_steering_limit": 0.2,
+    "max_linear_speed": 0.8,
+    "max_angular_speed": 0.8,
+    "max_linear_acceleration": 0.9,
+    "max_angular_acceleration": 1.3,
+}
+
+CHASSIS_PARAMETERS = tuple(CHASSIS_DEFAULTS)
 ODOMETRY_DEFAULTS = {
     "publish_odom": True,
     "odom_topic": "odom",
@@ -186,23 +188,17 @@ def controller_config(template, cfg, namespace, prefix):
     data["controller_manager"]["ros__parameters"]["update_rate"] = int(
         cfg["control"]["update_rate"]
     )
-    parameters = {key: float(cfg["control"][key]) for key in CHASSIS_PARAMETERS}
-    parameters.update(
-        {
-            key: float(cfg["geometry"][key])
-            for key in ("wheelbase", "track_width", "wheel_radius")
+    for kind, interface in (("steering", "position"), ("wheel", "velocity")):
+        data[kind + "_controller"] = {
+            "ros__parameters": {
+                "use_sim_time": True,
+                "interface_name": interface,
+                "joints": [
+                    prefix + corner + "_" + kind + "_joint"
+                    for corner in ("fl", "fr", "rl", "rr")
+                ],
+            }
         }
-    )
-    parameters.update(
-        update_rate=int(cfg["control"]["update_rate"]),
-        use_sim_time=True,
-        body_frame=prefix + "base_footprint",
-        simulation_time_interface=prefix + "execution_clock/simulation_time",
-    )
-    for kind in ("steering", "wheel"):
-        parameters[kind + "_joints"] = [
-            prefix + corner + "_" + kind + "_joint"
-            for corner in ("fl", "fr", "rl", "rr")
-        ]
-    data["chassis_controller"] = {"ros__parameters": parameters}
+    # Configure the upstream simulator servo directly; no hardware wrapper is needed.
+    data["gz_ros2_control"] = {"ros__parameters": {"position_proportional_gain": 1.0}}
     return {f"{namespace}/{key}": value for key, value in data.items()}

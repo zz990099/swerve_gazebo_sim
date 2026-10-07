@@ -105,7 +105,7 @@ def test_public_model_combines_chassis_and_plugins(
         assert contact.find("mu1").text == "1.0"
         assert contact.find("mu2").text == "1.0"
         assert contact.find("fdir1") is None
-    assert len(root.findall(".//gazebo/plugin")) == 2
+    assert len(root.findall(".//gazebo/plugin")) == 1
     assert root.find(".//gazebo/plugin/parameters").text == "/tmp/controllers.yaml"
     assert root.find(".//gazebo/plugin/ros/namespace").text == "/robot1"
     with_truth = ET.fromstring(
@@ -114,7 +114,7 @@ def test_public_model_combines_chassis_and_plugins(
             mappings=dict(mappings, publish_ground_truth="true"),
         ).toxml()
     )
-    assert len(with_truth.findall(".//gazebo/plugin")) == 3
+    assert len(with_truth.findall(".//gazebo/plugin")) == 2
     odometry_plugin = with_truth.find(
         f".//gazebo/plugin[@filename='{plugin_filename}']"
     )
@@ -124,29 +124,23 @@ def test_public_model_combines_chassis_and_plugins(
 
 
 @pytest.mark.parametrize("gazebo_version", ["ign", "gz"])
-def test_chassis_model_exports_synchronous_physics_clock(gazebo_version):
+def test_chassis_model_uses_official_hardware_without_physics_clock(gazebo_version):
     root = ET.fromstring(
         xacro.process_file(
             str(ROOT / "urdf/swerve_drive.urdf.xacro"),
             mappings={
                 "gazebo_version": gazebo_version,
                 "config_file": str(ROOT / "config/swerve.yaml"),
-                "prefix": "bot_",
             },
         ).toxml()
     )
     assert (
-        root.find(".//gazebo/plugin[@name='swerve_gazebo_sim::PhysicsClock']")
-        is not None
+        root.find(".//ros2_control/hardware/plugin").text
+        == "gz_ros2_control/GazeboSimSystem"
     )
-    hardware = root.find(".//ros2_control/hardware")
-    assert hardware.find("plugin").text == "swerve_gazebo_sim/StampedGazeboSystem"
-    assert hardware.find("param[@name='clock_name']").text == "bot_execution_clock"
-    assert (
-        root.find(
-            ".//ros2_control/sensor[@name='bot_execution_clock']/state_interface"
-        ).get("name")
-        == "simulation_time"
+    assert not root.findall(".//ros2_control/sensor")
+    assert not any(
+        "swerve_gazebo_sim::" in p.get("name", "") for p in root.findall(".//plugin")
     )
 
 
@@ -215,7 +209,13 @@ def test_namespace_and_controller_joint_alignment():
         prefix,
     )
     assert (
-        cfg["/fleet/robot1/chassis_controller"]["ros__parameters"]["wheel_joints"][0]
+        cfg["/fleet/robot1/gz_ros2_control"]["ros__parameters"][
+            "position_proportional_gain"
+        ]
+        == 1.0
+    )
+    assert (
+        cfg["/fleet/robot1/wheel_controller"]["ros__parameters"]["joints"][0]
         == "fleet_robot1_fl_wheel_joint"
     )
 

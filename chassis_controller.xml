@@ -1,5 +1,0 @@
-<library path="chassis_controller">
-  <class name="swerve_gazebo_sim/ChassisController" type="swerve_gazebo_sim::ChassisController" base_class_type="controller_interface::ControllerInterface">
-    <description>Explicit body velocity and mode protocol with measured execution admission.</description>
-  </class>
-</library>

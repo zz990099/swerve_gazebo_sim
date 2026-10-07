@@ -1,86 +1,83 @@
 # Chassis interface
 
-All topic names below are relative to the robot namespace. Joint order is
-FL, FR, RL, RR. Coordinates are body x-forward, y-left, positive yaw CCW.
-All values must be finite. Commands are planar; unused Twist components are zero.
+Topics are relative to the robot namespace. Joint order is FL, FR, RL, RR.
+Coordinates are body x-forward, y-left, positive yaw CCW. All values must be finite.
+Commands are planar; unused Twist components must be zero.
 
-| Direction | Topic | Type | Semantics |
+| Direction | Topic | Type | Meaning |
 |---|---|---|---|
-| Input | `chassis_controller/command` | `ChassisCommand` | Atomic body velocity and explicit mode request |
-| Output | `chassis_controller/state` | `ChassisState` | Measured joints/body twist, actual/requested mode, phase, receipt and fault |
-| Output | `joint_states` | `sensor_msgs/JointState` | Encoder position (rad) and wheel velocity (rad/s) |
-| Output | `odom` | `nav_msgs/Odometry` | Encoder-derived pose/twist; configurable topic and frames |
+| Input | `chassis_controller/command` | `ChassisCommand` | Body velocity and explicit mode request |
+| Output | `chassis_controller/state` | `ChassisState` | Measured joints/twist, modes, transition receipt and fault |
+| Output | `joint_states` | `sensor_msgs/JointState` | Steering position and drive velocity |
+| Output | `odom` | `nav_msgs/Odometry` | Encoder pose/twist; topic and frames configurable |
 | Output | `/tf`, `/tf_static` | TF | Robot transforms; odometry TF independently configurable |
-| Input clock | `/clock` | `rosgraph_msgs/Clock` | Generic Gazebo bridge for ROS observers and clients |
+| Input clock | `/clock` | `rosgraph_msgs/Clock` | Generic Gazebo bridge for ROS simulation time |
 
-Commands use reliable, volatile, depth-one QoS. Chassis state is best-effort,
-volatile, depth one. Subscribe with compatible QoS. There is no second actuator
-command entry point. `header.frame_id` must equal the configured body frame
-(default `base_footprint`, prefixed when applicable). Header stamps are simulation
-time. State stamps use the physics clock paired with the joint read, independently
-of delayed ROS `/clock` callbacks. Wheel speed in state is **rad/s**, not m/s.
+The joint-controller `steering_controller/commands` and `wheel_controller/commands`
+Float64MultiArray topics are internal actuation links. Only the Python chassis
+node may publish them. External clients use `ChassisCommand`; ROS does not enforce
+exclusive publishing on the internal topics.
 
-## Sessions and expiry
+Commands use reliable, volatile, depth-one QoS. State uses sensor-data QoS
+(best-effort, volatile, depth five). `header.frame_id` must equal the chassis body
+frame (default `base_footprint`, with the configured prefix). Command stamps use
+simulation time and cannot regress; at most 0.05 s of clock delivery skew is
+accepted. State stamps identify the last accepted encoder observation, rather
+than publication time or a synchronous physics iteration. Wheel speeds are rad/s.
 
-1. Wait for fresh measured state and stopped wheels. Startup mode is DualAckermann.
-2. Send a reset command with `reset=true`, a session ID greater than the last
-   accepted session, nonzero sequence, `mode=actual_mode`, request ID zero, and
-   zero velocity and entry velocity. Reset does not recenter steering.
-3. Wait for the matching session and Ready/confirmed state. Reset is one-shot;
-   retries use a newer session. Subsequent packets use `reset=false` and strictly
-   increasing sequence numbers in the accepted session.
-4. Publish fresh packets continuously, normally at 50 Hz. Defaults expire after
-   0.5 seconds in either simulation or wall time. Source stamps cannot regress
-   or be future-dated. Replayed sequences, invalid packets and expired commands
-   fault the chassis. Fault handling commands zero wheel speed and holds measured
-   steering. Normal commands cannot rearm a fault; repeat the stopped reset with
-   a newer session.
+## Velocity and modes
 
-A simulation pause is detected on the first resumed control update; a paused
-physics engine cannot physically execute a stop. Lifecycle deactivate/reactivate
-preserves session history and disarms the controller. Reloading the plugin starts
-a new process-local session history; clients must discover and reset explicitly.
-
-## Explicit modes
-
-| Mode | Value | Admitted body velocity |
+| Mode | Value | Allowed body velocity |
 |---|---|---|
 | DualAckermann | 0 | `vy=0`; yaw requires nonzero `vx` |
 | Spin | 1 | `vx=vy=0`; command `wz` |
 | Crab | 2 | `wz=0`; command `vx,vy` |
 
-To switch, while Ready, increment `request_id`, set `mode` to the target,
-set `velocity` to zero, and set `entry_velocity` to a representative legal
-velocity in that mode. Entry velocity specifies steering geometry, not motion.
-The chassis freezes that geometry, brakes with steering held, aligns only after
-measured wheels stop, and requires measured alignment dwell before confirmation.
-Continue refreshing the same request and unchanged entry velocity throughout.
-Wait for matching request ID, actual mode and Ready/confirmed before sending a
-nonzero velocity. A replacement request during a transition is rejected.
+Wait for fresh, confirmed state before driving. Startup mode is DualAckermann,
+request ID is zero, and entry velocity is zero. There is no separate arming or
+session handshake. Publish fresh commands continuously, normally at 50 Hz.
 
-Retain the accepted request ID and entry velocity in subsequent drive/hold
-packets; the returned accepted geometry is the original receipt. Changing the
-mode without a new request is invalid. Large steering changes within a mode also
-cause an automatic brake/alignment interval; they do not select a different mode.
+To change mode while Ready, send a `request_id` greater than the accepted ID,
+set `mode` to the target and `velocity` to zero. Set `entry_velocity` to a legal
+representative velocity in that mode. Entry velocity determines steering geometry
+but does not drive the chassis. A zero entry defaults to forward steering for
+DualAckermann/Crab and spin geometry for Spin.
 
-A zero velocity retains mode and steering while decelerating. It is not a mode
-request and does not imply forward alignment. Signed wheel velocities and
-steering commands bounded to +/- pi/2 implement reverse directions. The plant
-hard stops include a 0.02 rad margin beyond this operating range; see architecture.
+The chassis freezes the entry geometry, brakes with steering held, aligns only
+after measured wheels stop, and requires measured alignment dwell. Refresh the
+same request with zero velocity and unchanged entry throughout. Wait for matching
+request ID, actual mode and Ready/confirmed state before commanding motion.
+Requests cannot replace an active transition. Subsequent drive/hold commands
+retain the accepted request ID and entry velocity. Mode or entry mutation without
+a new request is invalid. Large steering changes within a mode also trigger
+braking/alignment without changing the selected mode.
 
-## Feedback and limits
+Ordinary zero velocity retains mode and steering while decelerating; it does not
+request forward alignment. Signed wheel velocity and +/-pi/2 steering implement
+reverse directions. Target limits/rates are configured in `config/swerve.yaml`;
+actual acceleration also depends on physics and contact.
 
-Phase: Fault=0, Braking=1, Aligning=2, Ready=3. `confirmed` requires Ready and no
-fault. Fault codes: None=0, Disarmed=1, Clock=2, Feedback=3, Command=4,
-Timeout=5, Transition=6, Write=7. `velocity` is reconstructed from measured joints.
-Encoder odometry is not ground truth or localization. State and odometry consumers
-must enforce their own freshness and synchronization requirements.
+## Faults and recovery
 
-`config/swerve.yaml` defines chassis geometry, speed/rate limits, transition dwell
-and timeouts. Updates run at 100 Hz. Steering, wheel and body target rates are
-bounded during normal operation; emergency fault zero commands bypass normal
-acceleration limits. These are simulator command rules, not collision or physical
-braking guarantees. No path, footprint clearance, goal or obstacle is interpreted.
+Defaults expire commands after 0.5 s of simulation age or wall-time silence and
+encoder feedback after 0.25 s. Invalid commands, stale feedback and clock rollback
+latch a fault. The Python node sends zero wheel targets and holds measured steering;
+fault zero bypasses the normal acceleration ramp. While physics is paused, zero
+targets can be sent but the physics engine cannot execute motion.
 
-Mode entry, limits and tracking must be modeled by a planner that needs accurate
-prediction. A planner must not assume its prediction controls the actual wheels.
+Recover with fresh encoder feedback and a new zero-velocity request with an ID
+greater than the last accepted ID, then wait for alignment confirmation. The
+request can retain the actual mode. Reusing an old request cannot clear a fault.
+Clock rollback clears pose and timestamp history but retains the request high-water
+mark. Restarting the Python node resets process-local history; reconnecting clients
+must discover the current state.
+
+Phase: Fault=0, Braking=1, Aligning=2, Ready=3. `confirmed` means Ready with no fault.
+Fault: None=0, Clock=1, Feedback=2, Command=3, CommandTimeout=4,
+TransitionTimeout=5. The accepted entry velocity/steering fields are a frozen
+request receipt. Measured velocity and odometry are encoder estimates, not ground
+truth or localization; consumers must check freshness themselves.
+
+The watchdog requires a running Python node. See the process-supervision boundary
+in [architecture](ARCHITECTURE.md), especially for external Gazebo worlds.
+No path, goal, obstacle, clearance or collision decision is made here.

@@ -1,7 +1,0 @@
-<library path="stamped_gazebo_system">
-  <class name="swerve_gazebo_sim/StampedGazeboSystem"
-         type="swerve_gazebo_sim::StampedGazeboSystem"
-         base_class_type="gz_ros2_control::GazeboSimSystemInterface">
-    <description>Upstream joint physics with synchronous Gazebo observation time.</description>
-  </class>
-</library>

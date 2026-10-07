@@ -53,20 +53,13 @@
 
     <ros2_control name="${prefix}SwerveSystem" type="system">
       <hardware>
-          <plugin>swerve_gazebo_sim/StampedGazeboSystem</plugin>
-          <param name="clock_name">${prefix}execution_clock</param>
+        <plugin>gz_ros2_control/GazeboSimSystem</plugin>
       </hardware>
-        <sensor name="${prefix}execution_clock">
-          <state_interface name="simulation_time" />
-        </sensor>
       <xacro:control_module name="fl" />
       <xacro:control_module name="fr" />
       <xacro:control_module name="rl" />
       <xacro:control_module name="rr" />
     </ros2_control>
-      <gazebo>
-        <plugin filename="stamped_gazebo_system" name="swerve_gazebo_sim::PhysicsClock" />
-      </gazebo>
 
     <gazebo>
       <plugin

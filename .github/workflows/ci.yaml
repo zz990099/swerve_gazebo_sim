@@ -15,7 +15,7 @@ concurrency:
 
 jobs:
   style:
-    name: Python style
+    name: Python checks
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
@@ -23,11 +23,14 @@ jobs:
         with:
           python-version: "3.12"
       - name: Install style tools
-        run: python -m pip install black==26.5.1 ruff==0.16.9
+        run: python -m pip install black==26.5.1 ruff==0.16.9 pytest pyyaml xacro
       - name: Check formatting and lint
         run: |
           black --check --workers 1 swerve_gazebo_sim launch test
           ruff check swerve_gazebo_sim launch test
+
+      - name: Run portable chassis, kinematics and model tests
+        run: PYTHONPATH=. pytest -q test/test_chassis.py test/test_kinematics.py test/test_model.py test/test_truth.py
 
   simulation:
     name: ${{ matrix.ros }} / ${{ matrix.gazebo }}
@@ -47,7 +50,6 @@ jobs:
             image: ros:jazzy-ros-base-noble
     container:
       image: ${{ matrix.image }}
-      options: --cap-add SYS_PTRACE --security-opt seccomp=unconfined
     defaults:
       run:
         shell: bash
@@ -66,7 +68,7 @@ jobs:
         run: |
           apt-get update
           apt-get install --no-install-recommends -y \
-            build-essential cmake gdb python3-colcon-common-extensions \
+            build-essential cmake python3-colcon-common-extensions \
             python3-rosdep python3-pytest \
             "ros-${ROS_DISTRO}-ros-gz" "ros-${ROS_DISTRO}-gz-ros2-control"
           if [[ ! -f /etc/ros/rosdep/sources.list.d/20-default.list ]]; then

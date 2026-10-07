@@ -23,13 +23,13 @@ geometry:
   steering_mass: 0.2
 
 control:
-  # Fixed ros2_control update frequency; bundled physics runs at 200 Hz.
+  # Fixed Python and ros2_control update frequency; bundled physics runs at 200 Hz.
   update_rate: 100.0
   # Maximum command age in simulation time and silence in steady wall time (s).
   # Expiry latches a fault, commands zero wheels and holds measured steering.
   cmd_timeout: 0.5
   wall_timeout: 0.5
-  # Encoder odometry maximum observation gap/age (s).
+  # Encoder maximum observation gap/age in simulation and wall time (s).
   feedback_timeout: 0.25
   # Drive joint angular limits: rad/s and rad/s^2. Normal braking uses this ramp.
   max_wheel_speed: 20.0

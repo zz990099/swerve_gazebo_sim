@@ -3,7 +3,9 @@ controller_manager:
     update_rate: 100
     joint_state_broadcaster:
       type: joint_state_broadcaster/JointStateBroadcaster
-    chassis_controller:
-      type: swerve_gazebo_sim/ChassisController
+    steering_controller:
+      type: forward_command_controller/ForwardCommandController
+    wheel_controller:
+      type: forward_command_controller/ForwardCommandController
 joint_state_broadcaster:
   ros__parameters: {}

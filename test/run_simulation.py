@@ -66,6 +66,17 @@ def main():
                 time.sleep(0.2)
             if probe.returncode:
                 raise RuntimeError(f"Chassis acceptance failed: {probe.returncode}")
+            # Killing the Python command owner must tear down the isolated demo.
+            controllers = [
+                p
+                for p in psutil.Process(simulation.pid).children(recursive=True)
+                if "swerve_gazebo_sim.controller" in p.cmdline()
+            ]
+            if len(controllers) != 1:
+                raise RuntimeError(f"Expected one chassis process, got {controllers}")
+            controllers[0].kill()
+            simulation.wait(timeout=20)
+            print("PASS: chassis process death shuts down demo", flush=True)
         finally:
             for process in (probe, simulation):
                 if process is not None:
