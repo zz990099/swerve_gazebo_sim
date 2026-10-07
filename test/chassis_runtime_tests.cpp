@@ -229,6 +229,20 @@ int main() {
       f.step(false);
       require(f.runtime.fault() == Fault::Command, "moving reset rejected");
     }
+    {
+      Fixture f;
+      f.runtime.update(std::numeric_limits<double>::quiet_NaN(), .02,
+                       f.measured);
+      require(f.runtime.fault() == Fault::Clock, "invalid clock faults");
+      f.step();
+      require(!f.runtime.confirmed(),
+              "clock return must not automatically rearm");
+      f.command.reset = true;
+      ++f.command.session;
+      f.step();
+      require(f.runtime.confirmed(),
+              "fresh stopped recovery after clock fault");
+    }
     Config bad;
     bad.max_steering_rate = 0;
     bool threw = false;

@@ -174,8 +174,8 @@ public:
                        (last_wall_ < 0 || wall >= last_wall_);
     const double dt = clock && last_now_ >= 0 ? now - last_now_ : 0;
     const bool gap = last_wall_ >= 0 && wall - last_wall_ > c_.wall_timeout;
-    last_now_ = now;
-    last_wall_ = wall;
+    last_now_ = std::isfinite(now) && now >= 0 ? now : -1;
+    last_wall_ = std::isfinite(wall) && wall >= 0 ? wall : -1;
     if (!clock || dt > .03 || gap) {
       stop(Fault::Clock);
       return stopped_targets(measured);

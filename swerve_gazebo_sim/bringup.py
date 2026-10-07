@@ -194,6 +194,7 @@ def controller_config(template, cfg, namespace, prefix):
         }
     )
     parameters.update(
+        update_rate=int(cfg["control"]["update_rate"]),
         use_sim_time=True,
         body_frame=prefix + "base_footprint",
         simulation_time_interface=prefix + "execution_clock/simulation_time",

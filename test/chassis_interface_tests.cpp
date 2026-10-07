@@ -55,6 +55,7 @@ int main(int argc, char **argv) {
         rclcpp::Parameter("steering_joints", steering));
     controller->get_node()->set_parameter(
         rclcpp::Parameter("wheel_joints", wheels));
+    controller->get_node()->set_parameter(rclcpp::Parameter("update_rate", 100));
     require(controller->configure().label() == "inactive", "configure failed");
     std::vector<hardware_interface::LoanedCommandInterface> cl;
     std::vector<hardware_interface::LoanedStateInterface> sl;

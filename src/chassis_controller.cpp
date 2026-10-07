@@ -21,6 +21,7 @@ public:
       auto_declare<std::string>("body_frame", "base_footprint");
       auto_declare<std::string>("simulation_time_interface",
                                 "execution_clock/simulation_time");
+      auto_declare<std::int64_t>("update_rate", 100);
       Config c;
 #define FIELD(name) auto_declare<double>(#name, c.name);
       FIELD(wheelbase)
@@ -36,7 +37,6 @@ public:
       FIELD(stopped_wheel_speed)
       FIELD(cmd_timeout)
       FIELD(wall_timeout)
-      FIELD(update_rate)
       FIELD(drive_steering_limit)
       FIELD(max_linear_speed)
       FIELD(max_angular_speed)
@@ -99,13 +99,14 @@ public:
       FIELD(stopped_wheel_speed)
       FIELD(cmd_timeout)
       FIELD(wall_timeout)
-      FIELD(update_rate)
       FIELD(drive_steering_limit)
       FIELD(max_linear_speed)
       FIELD(max_angular_speed)
       FIELD(max_linear_acceleration)
       FIELD(max_angular_acceleration)
 #undef FIELD
+      c.update_rate = static_cast<double>(get_node()->get_parameter("update_rate").as_int());
+      parameters.push_back(c.update_rate);
       validate(c);
       auto body = get_node()->get_parameter("body_frame").as_string();
       auto clock =

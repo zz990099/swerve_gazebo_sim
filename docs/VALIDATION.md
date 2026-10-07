@@ -16,7 +16,8 @@ cannot establish physical tracking.
 
 ROS CI builds this repository alone on Humble/Fortress and Jazzy/Harmonic. It
 runs kinematics, Xacro, strict configuration, launch, truth-decoding and odometry
-unit tests. The physical test loads the actual controller plugin, performs all
+unit tests. A plugin-level DDS test checks frame rejection, invalid callback
+overwrite, command writes, stopped recovery and lifecycle reconfiguration. The physical test loads the actual controller plugin, performs all
 six directed mode changes, checks Gazebo truth translation/rotation, verifies
 zero hold and publisher-loss stopping. It uses no planner or path fixtures.
 
