@@ -22,6 +22,7 @@ def main():
         parameter_overrides=[Parameter("use_sim_time", value=True)],
     )
     state = [None]
+    last_report = [None]
     node.create_subscription(
         ChassisState,
         "/chassis_controller/state",
@@ -41,6 +42,18 @@ def main():
             publisher.publish(command)
         rclpy.spin_once(node, timeout_sec=0.005)
         time.sleep(0.005)
+        if state[0] is not None:
+            s = state[0]
+            key = (s.header.stamp.sec, s.request_id, s.phase, s.fault)
+            if key != last_report[0]:
+                print(
+                    f"state t={s.header.stamp.sec + s.header.stamp.nanosec * 1e-9:.3f} "
+                    f"request={s.request_id} mode={s.actual_mode}->{s.requested_mode} "
+                    f"phase={s.phase} fault={s.fault} "
+                    f"steer={list(s.steering_angles)} wheels={list(s.wheel_speeds)}",
+                    flush=True,
+                )
+                last_report[0] = key
 
     def wait(predicate, timeout=12, publish=True):
         deadline = time.monotonic() + timeout
