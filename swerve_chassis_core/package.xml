@@ -1,0 +1,5 @@
+<?xml version="1.0"?>
+<package format="3"><name>swerve_chassis_core</name><version>1.0.0</version>
+<description>Continuous swerve chassis core.</description>
+<maintainer email="188520056629@163.com">Binfeng Zhang</maintainer><license>Apache-2.0</license>
+<buildtool_depend>cmake</buildtool_depend><export><build_type>cmake</build_type></export></package>

@@ -3,13 +3,13 @@
 
 import os
 import shlex
-import sys
 import tempfile
 from functools import partial
 
 import xacro
 import yaml
 from ament_index_python.packages import get_package_share_directory
+from launch import LaunchDescription
 from launch.actions import (
     DeclareLaunchArgument,
     EmitEvent,
@@ -23,8 +23,6 @@ from launch.events import Shutdown
 from launch.launch_description_sources import PythonLaunchDescriptionSource
 from launch.substitutions import LaunchConfiguration
 from launch_ros.actions import Node
-
-from launch import LaunchDescription
 
 from .bringup import (
     ODOMETRY_DEFAULTS,
@@ -208,8 +206,8 @@ def spawn_setup(context, variant):
         odometry_parameters(context, configuration["control"])
     )
     swerve_controller = Node(
-        executable=sys.executable,
-        arguments=["-m", "swerve_gazebo_sim.controller"],
+        package="swerve_chassis_controller",
+        executable="swerve_controller",
         exec_name="swerve_controller",
         namespace=namespace,
         output="screen",

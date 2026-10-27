@@ -5,7 +5,6 @@ from textwrap import dedent
 import pytest
 import xacro
 import yaml
-
 from swerve_gazebo_sim.bringup import (
     controller_config,
     gazebo_variant,

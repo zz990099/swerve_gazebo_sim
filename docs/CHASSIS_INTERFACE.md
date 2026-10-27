@@ -1,83 +1,50 @@
-# Chassis interface
+# Chassis interface v1
 
-Topics are relative to the robot namespace. Joint order is FL, FR, RL, RR.
-Coordinates are body x-forward, y-left, positive yaw CCW. All values must be finite.
-Commands are planar; unused Twist components must be zero.
+All relative topics are resolved in the robot namespace. `base_footprint` is
+prefixed with `frame_prefix`; input is in the body frame, no TF conversion occurs.
 
-| Direction | Topic | Type | Meaning |
-|---|---|---|---|
-| Input | `chassis_controller/command` | `ChassisCommand` | Body velocity and explicit mode request |
-| Output | `chassis_controller/state` | `ChassisState` | Measured joints/twist, modes, transition receipt and fault |
-| Output | `joint_states` | `sensor_msgs/JointState` | Steering position and drive velocity |
-| Output | `odom` | `nav_msgs/Odometry` | Encoder pose/twist; topic and frames configurable |
-| Output | `/tf`, `/tf_static` | TF | Robot transforms; odometry TF independently configurable |
-| Input clock | `/clock` | `rosgraph_msgs/Clock` | Generic Gazebo bridge for ROS simulation time |
+| Topic | Type | Contract |
+| --- | --- | --- |
+| `cmd_vel` | `geometry_msgs/TwistStamped` | Default; current ROS stamp, exact body frame, x/y/yaw rates |
+| `cmd_vel` | `geometry_msgs/Twist` | Only when startup `command_type=unstamped`; receive time/body frame implied |
+| `joint_states` | `sensor_msgs/JointState` | Each of eight named joints exactly once; steering position and drive velocity required |
+| `steering_controller/commands` | `std_msgs/Float64MultiArray` | FL, FR, RL, RR angle targets, rad |
+| `wheel_controller/commands` | `std_msgs/Float64MultiArray` | FL, FR, RL, RR drive targets, rad/s |
+| `chassis_controller/state` | `swerve_chassis_msgs/ChassisState` | Sensor-data QoS; execution and prediction snapshot |
+| `odom` | `nav_msgs/Odometry` | Configurable topic/frame, measured encoder estimate |
 
-The joint-controller `steering_controller/commands` and `wheel_controller/commands`
-Float64MultiArray topics are internal actuation links. Only the Python chassis
-node may publish them. External clients use `ChassisCommand`; ROS does not enforce
-exclusive publishing on the internal topics.
+Only linear.x, linear.y and angular.z may be nonzero. NaN/Inf and other axes
+are errors. Stamped commands require a nonnegative, strictly increasing timestamp
+no older than `cmd_timeout` and no more than 0.01 s in the future. Commands time
+out after `wall_timeout` even if simulation time is paused. Feedback similarly
+requires fresh source and receive times within `feedback_timeout`. Fresh zero
+commands recover a latched fault only after the measured drive wheels stop.
 
-Commands use reliable, volatile, depth-one QoS. State uses sensor-data QoS
-(best-effort, volatile, depth five). `header.frame_id` must equal the chassis body
-frame (default `base_footprint`, with the configured prefix). Command stamps use
-simulation time and cannot regress; at most 0.05 s of clock delivery skew is
-accepted. State stamps identify the last accepted encoder observation, rather
-than publication time or a synchronous physics iteration. Wheel speeds are rad/s.
+The state publication header is current ROS time. `feedback_stamp` identifies the
+encoder sample, `command_stamp` identifies the last accepted input (receive time
+for unstamped input), and `command_sequence` is an ordinary accepted-message
+counter, not an acknowledgement protocol.
 
-## Velocity and modes
+`steering_angles` / `wheel_speeds` are measured, `velocity` is their fitted body
+velocity. `requested_velocity` is the last accepted input, `executable_velocity`
+is the coordinated target. Restore `core::State` using `target_steering`,
+`target_wheel_speeds`, `generator_valid`. Planning also requires fresh measured
+joints and the expected command/control timing; a stale or invalid snapshot
+must not be used for moving rollout initialization.
 
-| Mode | Value | Allowed body velocity |
-|---|---|---|
-| DualAckermann | 0 | `vy=0`; yaw requires nonzero `vx` |
-| Spin | 1 | `vx=vy=0`; command `wz` |
-| Crab | 2 | `wz=0`; command `vx,vy` |
+`execution`: 0 tracking, 1 limited, 2 braking, 3 presteering, 4 stopped.
+`fault`: 0 none, 1 command/command timeout, 2 feedback, 3 clock/control time gap.
+`command_fresh`, `feedback_valid` are independent freshness indicators.
+`consistency_residual` is RMS wheel-vector disagreement in m/s.
 
-Wait for fresh, confirmed state before driving. Startup mode is DualAckermann,
-request ID is zero, and entry velocity is zero. There is no separate arming or
-session handshake. Publish fresh commands continuously, normally at 50 Hz.
+`geometry` order: wheelbase, track_width, wheel_radius (meters).
+`limits` order: steering limit, steering rate, wheel speed, wheel acceleration,
+linear speed, angular speed, linear acceleration, angular acceleration,
+steering tracking tolerance, stopped wheel speed. These are the exact startup
+parameters used by the core. Downstream MPPI must compare them with its model
+configuration before accepting a snapshot. No second independent set of limits
+should silently override them.
 
-To change mode while Ready, send a `request_id` greater than the accepted ID,
-set `mode` to the target and `velocity` to zero. Set `entry_velocity` to a legal
-representative velocity in that mode. Entry velocity determines steering geometry
-but does not drive the chassis. A zero entry defaults to forward steering for
-DualAckermann/Crab and spin geometry for Spin.
-
-The chassis freezes the entry geometry, brakes with steering held, aligns only
-after measured wheels stop, and requires measured alignment dwell. Refresh the
-same request with zero velocity and unchanged entry throughout. Wait for matching
-request ID, actual mode and Ready/confirmed state before commanding motion.
-Requests cannot replace an active transition. Subsequent drive/hold commands
-retain the accepted request ID and entry velocity. Mode or entry mutation without
-a new request is invalid. Large steering changes within a mode also trigger
-braking/alignment without changing the selected mode.
-
-Ordinary zero velocity retains mode and steering while decelerating; it does not
-request forward alignment. Signed wheel velocity and +/-pi/2 steering implement
-reverse directions. Target limits/rates are configured in `config/swerve.yaml`;
-actual acceleration also depends on physics and contact.
-
-## Faults and recovery
-
-Defaults expire commands after 0.5 s of simulation age or wall-time silence and
-encoder feedback after 0.25 s. Invalid commands, stale feedback and clock rollback
-latch a fault. The Python node sends zero wheel targets and holds measured steering;
-fault zero bypasses the normal acceleration ramp. While physics is paused, zero
-targets can be sent but the physics engine cannot execute motion.
-
-Recover with fresh encoder feedback and a new zero-velocity request with an ID
-greater than the last accepted ID, then wait for alignment confirmation. The
-request can retain the actual mode. Reusing an old request cannot clear a fault.
-Clock rollback clears pose and timestamp history but retains the request high-water
-mark. Restarting the Python node resets process-local history; reconnecting clients
-must discover the current state.
-
-Phase: Fault=0, Braking=1, Aligning=2, Ready=3. `confirmed` means Ready with no fault.
-Fault: None=0, Clock=1, Feedback=2, Command=3, CommandTimeout=4,
-TransitionTimeout=5. The accepted entry velocity/steering fields are a frozen
-request receipt. Measured velocity and odometry are encoder estimates, not ground
-truth or localization; consumers must check freshness themselves.
-
-The watchdog requires a running Python node. See the process-supervision boundary
-in [architecture](ARCHITECTURE.md), especially for external Gazebo worlds.
-No path, goal, obstacle, clearance or collision decision is made here.
+The former mode, requested mode, entry velocity, request ID, confirmed and
+accepted steering fields have no compatibility adapter. Update consumers to
+standard velocity + measured/prediction state. Select one message type at startup.

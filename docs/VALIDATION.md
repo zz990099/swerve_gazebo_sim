@@ -1,31 +1,46 @@
-# Validation
+# Validation and migration baseline
 
-ROS-independent production-runtime, kinematics, model and truth-decoding tests:
+Old main baseline: `9358c96884d7fa4866cea7c053daa7a7cec82d8f`.
+Its existing CI run 37631105628 passed on 2026-10-07. This preserves the old code
+and test recipe; no new old-versus-new physical recordings were obtained locally.
 
-```bash
-python3 -m pip install pytest pyyaml xacro
-PYTHONPATH=. python3 -m pytest -q test/test_chassis.py test/test_kinematics.py test/test_model.py test/test_truth.py
-```
-
-They cover all six directed mode changes, measured stop before alignment, frozen
-receipts, same-mode realignment, target limits, reverse motion, zero hold, malformed
-commands, command loss, paused clocks, clock rollback, feedback faults and explicit
-recovery. Runtime tests model perfect actuator following; physical behavior is
-checked separately.
-
-CI builds this repository alone on Humble/Fortress and Jazzy/Harmonic. It tests
-Python execution/odometry, ROS message adaptation, launch, strict configuration
-and Xacro. Physical acceptance runs the official hardware and forward controllers,
-performs all six mode changes, checks independent Gazebo truth translation/rotation,
-verifies zero hold, publisher-loss stopping and recovery, then kills the Python
-chassis process and checks that the standalone demo exits.
+## Portable checks
 
 ```bash
-colcon test --packages-select swerve_gazebo_sim --return-code-on-test-failure
-colcon test-result --verbose
-python3 src/swerve_gazebo_sim/test/run_simulation.py --gazebo-version gz --logs artifacts/chassis
+cmake -S swerve_chassis_core -B build-core -DCMAKE_BUILD_TYPE=Release
+cmake --build build-core -j2
+ctest --test-dir build-core --output-on-failure
+PYTHONPATH=swerve_gazebo_sim python3 -m pytest -q \
+  swerve_gazebo_sim/test/test_model.py swerve_gazebo_sim/test/test_truth.py
 ```
 
-Use `--gazebo-version ign` on Humble/Fortress. Consult the workflow for the exact
-commit. Acceptance checks basic physical operation, not calibrated slip, obstacle
-navigation, hard real-time timing or external-world process supervision.
+Core coverage includes 10,000 seeded inverse/forward round trips, coordinated
+wheel residual, rate/speed/travel bounds, lateral startup, combined motion,
+rotation, reversal, representation boundary, single-wheel zero, zero hold,
+state restoration, stalled steering and exact SE(2) integration. Tests throw
+on failure in release builds too (they do not rely on disabled `assert`).
+
+## ROS and physical checks
+
+`colcon test` includes a real C++ controller process driven by fake joint states
+and a controlled ROS clock. It checks combined velocity, timeout, recovery,
+missing feedback, paused time and rollback. This test is separate from physics.
+
+```bash
+python3 src/swerve_gazebo_sim/swerve_gazebo_sim/test/run_simulation.py \
+  --gazebo-version gz --logs artifacts/chassis
+```
+
+The physical probe commands translation, lateral movement, rotation, simultaneous
+vx/vy/wz, reversal across steering representations, and a zero-speed wheel.
+After settling, independent Gazebo poses must match the requested constant twist
+to 0.15 m / 0.10 rad over the observation interval. It also checks zero hold,
+command-loss braking, recovery and demo teardown after controller death.
+CI runs Humble/Fortress and Jazzy/Harmonic. Humble/Harmonic is not a matrix entry.
+
+Local implementation environment has no ROS or Gazebo. Portable checks can run
+here; ROS compilation, node integration and physical acceptance are established
+only by CI results, not by the mathematical model. This phase does not establish
+MPPI tracking improvement, calibrated actuator response, tire slip bounds,
+long-run drift, target-hardware latency, or old/new comparative path metrics.
+Those remain integration acceptance work after the MPPI migration.

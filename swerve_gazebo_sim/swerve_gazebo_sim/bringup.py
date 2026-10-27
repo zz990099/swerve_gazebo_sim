@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
-"""Strict current chassis configuration shared by model, Python controller and launch."""
+"""Strict current chassis configuration shared by model and launch."""
 
 import math
 import re
@@ -21,18 +21,16 @@ GEOMETRY = (
 )
 
 CHASSIS_DEFAULTS = {
+    "steering_tracking_tolerance": 0.05,
+    "command_type": "stamped",
     "steering_limit": math.pi / 2,
     "max_wheel_speed": 20.0,
     "max_wheel_acceleration": 40.0,
     "max_steering_rate": 2.5,
-    "steering_alignment_tolerance": 0.05,
-    "steering_alignment_duration": 0.05,
-    "mode_switch_timeout": 5.0,
     "stopped_wheel_speed": 0.05,
     "cmd_timeout": 0.5,
     "wall_timeout": 0.5,
     "update_rate": 100.0,
-    "drive_steering_limit": 0.2,
     "max_linear_speed": 0.8,
     "max_angular_speed": 0.8,
     "max_linear_acceleration": 0.9,
@@ -125,7 +123,10 @@ UniqueLoader.add_constructor(
 def validate_control(c):
     for key in CONTROL:
         value = c[key]
-        if key in ("publish_odom", "publish_odom_tf"):
+        if key == "command_type":
+            if value not in ("stamped", "unstamped"):
+                raise ValueError("command_type must be stamped or unstamped")
+        elif key in ("publish_odom", "publish_odom_tf"):
             if not isinstance(value, bool):
                 raise ValueError(f"{key} must be boolean")
         elif key in ("odom_topic", "odom_frame", "odom_child_frame"):
@@ -146,10 +147,6 @@ def validate_control(c):
         raise ValueError(
             "This chassis requires 100 Hz control and pi/2 steering travel"
         )
-    if c["mode_switch_timeout"] <= c["steering_alignment_duration"]:
-        raise ValueError("Mode deadline must exceed alignment dwell")
-    if c["drive_steering_limit"] < c["steering_alignment_tolerance"]:
-        raise ValueError("Moving steering limit must cover alignment tolerance")
     if c["odom_frame"] and c["odom_frame"] == c["odom_child_frame"]:
         raise ValueError("Odometry frames must differ")
 

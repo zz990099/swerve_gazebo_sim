@@ -1,0 +1,5 @@
+<?xml version="1.0"?>
+<package format="3"><name>swerve_chassis_controller</name><version>1.0.0</version>
+<description>Continuous swerve chassis controller.</description>
+<maintainer email="188520056629@163.com">Binfeng Zhang</maintainer><license>Apache-2.0</license>
+<buildtool_depend>ament_cmake</buildtool_depend><depend>swerve_chassis_core</depend><depend>swerve_chassis_msgs</depend><depend>rclcpp</depend><depend>sensor_msgs</depend><depend>std_msgs</depend><depend>geometry_msgs</depend><depend>nav_msgs</depend><depend>tf2_ros</depend><export><build_type>ament_cmake</build_type></export></package>
