@@ -60,7 +60,9 @@ def main():
         assert state[0].fault == 0, state[0]
 
     def set_twist(values):
-        command.twist.linear.x, command.twist.linear.y, command.twist.angular.z = values
+        command.twist.linear.x, command.twist.linear.y, command.twist.angular.z = map(
+            float, values
+        )
 
     def stamp(msg):
         return msg.header.stamp.sec + msg.header.stamp.nanosec * 1e-9

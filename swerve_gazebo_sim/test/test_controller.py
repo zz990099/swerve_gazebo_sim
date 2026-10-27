@@ -78,7 +78,9 @@ def test_controller_watchdogs_and_feedback():
             msg = TwistStamped()
             msg.header.stamp = clk.clock
             msg.header.frame_id = "base_footprint"
-            msg.twist.linear.x, msg.twist.linear.y, msg.twist.angular.z = velocity
+            msg.twist.linear.x, msg.twist.linear.y, msg.twist.angular.z = map(
+                float, velocity
+            )
             command.publish(msg)
         for _ in range(5):
             rclpy.spin_once(node, timeout_sec=0.003)
