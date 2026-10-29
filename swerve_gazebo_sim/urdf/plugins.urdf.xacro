@@ -19,6 +19,16 @@
       value="${namespace + '/ground_truth/odom' if namespace else '/ground_truth/odom'}"
     />
 
+    <!-- Independent body orientation sensor; ground truth remains observer-only. -->
+    <gazebo reference="${prefix}base_link">
+      <sensor name="${prefix}body_imu" type="imu">
+        <always_on>true</always_on>
+        <update_rate>100</update_rate>
+        <topic>${namespace + '/imu/data' if namespace else '/imu/data'}</topic>
+        <imu />
+      </sensor>
+    </gazebo>
+
     <xacro:macro name="wheel_contact" params="corner">
       <gazebo reference="${prefix}${corner}_wheel_link">
         <mu1>1.0</mu1>

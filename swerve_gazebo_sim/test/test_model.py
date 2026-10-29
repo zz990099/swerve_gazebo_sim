@@ -98,7 +98,13 @@ def test_public_model_combines_chassis_and_plugins(
     root = ET.fromstring(xacro.process_file(str(model), mappings=mappings).toxml())
     assert len([j for j in root.findall("joint") if j.get("type") != "fixed"]) == 8
     assert len(root.findall(".//ros2_control")) == 1
-    wheel_contacts = root.findall(".//gazebo[@reference]")
+    wheel_contacts = [
+        g for g in root.findall(".//gazebo[@reference]") if g.find("mu1") is not None
+    ]
+    imu = root.find(".//gazebo[@reference='robot1_base_link']/sensor")
+    assert imu is not None and imu.get("type") == "imu"
+    assert imu.find("topic").text == "/robot1/imu/data"
+    assert float(imu.find("update_rate").text) == 100
     assert len(wheel_contacts) == 4
     for contact in wheel_contacts:
         assert contact.find("mu1").text == "1.0"
