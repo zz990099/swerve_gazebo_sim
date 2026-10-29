@@ -30,8 +30,11 @@ the equivalent reversed drive representation is selected within that range.
 
 If progress is blocked, all drive targets are reduced by a common scale while
 holding steering. Once commanded and measured wheels are stopped, the target
-steering advances at a bounded rate; a stalled servo cannot accumulate unbounded
-target lead. This is an actuator fallback, not a chassis motion mode. A continuous
+steering advances continuously at the target-rate limit within the mechanical
+angle limits. During this stationary phase its target may lead the encoders;
+the drive tracking gate still prevents rolling until the measured steering
+catches up. A stalled servo therefore cannot enable drive. This is an actuator
+fallback, not a chassis motion mode. A continuous
 feasible gradual change of twist stays in motion. Exact zero holds the last angles.
 
 Every nonzero nominal target satisfies the same rigid-body rolling constraint.

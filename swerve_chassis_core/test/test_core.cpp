@@ -72,6 +72,32 @@ int main()
     check(error(out.velocity, {}) < 1e-12, "drive while steering stalled");
   }
   Joints inconsistent;
+  // A finite servo may lag a stationary presteering target; this must neither
+  // stall target progression nor allow driving before encoder alignment.
+  state = {};
+  actual = {};
+  int first_drive = -1;
+  for (int n = 0; n < 200; ++n) {
+    const auto old = state;
+    const auto out = generator.step({0, .3, 0}, actual, state, .01);
+    for (int i = 0; i < 4; ++i) {
+      check(std::abs(out.state.command.steering[i] - old.command.steering[i]) <= .025 + 1e-9,
+            "presteering target rate");
+      if (std::abs(out.state.command.speed[i]) > .05) {
+        check(std::abs(out.state.command.steering[i] - actual.steering[i]) <=
+                l.tracking_tolerance + l.steering_rate * .01 + 1e-9,
+              "drive waits for actual steering");
+        if (first_drive < 0) first_drive = n;
+      }
+    }
+    state = out.state;
+    auto servo = state.command;
+    for (int i = 0; i < 4; ++i)
+      servo.steering[i] = actual.steering[i] +
+        (1 - std::exp(-.01 / .12)) * (servo.steering[i] - actual.steering[i]);
+    actual = response(actual, servo, l, .01);
+  }
+  check(first_drive > 0 && first_drive < 150, "finite servo presteers without staircase waits");
   inconsistent.speed = {1, 2, 3, 4};
   check(residual(g, inconsistent) > 0.01, "inconsistency observable");
   auto p = integrate({}, {1, 0, 1}, pi / 2);

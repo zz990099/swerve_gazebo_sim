@@ -2,7 +2,7 @@ name: ROS and Gazebo CI
 
 on:
   push:
-    branches: [main]
+    branches: [main, codex/presteering-ab]
   pull_request:
   workflow_dispatch:
 

@@ -154,11 +154,11 @@ Result Generator::step(Twist desired, const Joints & measured, const State & pre
   } else if (!zero && peak(measured.speed) <= l.stopped_speed) {
     auto target = inverse(geometry_, desired, old.steering);
     for (size_t i = 0; i < 4; ++i) {
-      // A lagging steering servo must catch up before advancing its target.
-      if (std::abs(old.steering[i] - measured.steering[i]) <= l.tracking_tolerance) {
-        state.command.steering[i] += std::clamp(target.steering[i] - old.steering[i],
-                                                -l.steering_rate * dt, l.steering_rate * dt);
-      }
+      // With both requested and measured drive stopped, reorient continuously
+      // at the target-rate limit. Encoder tracking still gates *driving* above;
+      // applying that same gate here creates a stop-and-wait steering staircase.
+      state.command.steering[i] += std::clamp(target.steering[i] - old.steering[i],
+                                            -l.steering_rate * dt, l.steering_rate * dt);
     }
     reason = Reason::presteering;
   } else {
