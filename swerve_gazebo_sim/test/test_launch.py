@@ -33,6 +33,8 @@ def test_version_specific_launch_has_no_runtime_version_argument(
     assert "gazebo_version" not in arguments
     assert {"config", "namespace", "robot_name", "world_name"} <= arguments
     assert {
+        "publish_ground_truth_map_tf",
+        "map_frame",
         "bridge_config",
         "start_bridge",
         "publish_odom",

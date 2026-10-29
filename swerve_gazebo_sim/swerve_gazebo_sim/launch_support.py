@@ -106,14 +106,29 @@ def spawn_setup(context, variant):
         "urdf",
         "swerve_drive.urdf.xacro",
     )
+    ideal_localization = (
+        LaunchConfiguration("publish_ground_truth_map_tf").perform(context).lower()
+        == "true"
+    )
+    if ideal_localization and not configuration["control"]["publish_odom"]:
+        raise ValueError("Ideal localization requires wheel Odometry messages")
+    body_frame = (
+        configuration["control"]["odom_child_frame"] or prefix + "base_footprint"
+    )
+    if ideal_localization and body_frame != prefix + "base_footprint":
+        raise ValueError(
+            "Ideal localization requires the ground-truth base_footprint reference"
+        )
     xacro_mappings = {
         "gazebo_version": variant["name"],
         "config_file": config_file,
         "prefix": prefix,
         "namespace": namespace,
         "controllers_file": controllers_file,
-        "publish_ground_truth": LaunchConfiguration("publish_ground_truth").perform(
-            context
+        "publish_ground_truth": (
+            "true"
+            if ideal_localization
+            else LaunchConfiguration("publish_ground_truth").perform(context)
         ),
     }
     try:
@@ -264,7 +279,41 @@ def spawn_setup(context, variant):
         )
     )
 
+    localization_nodes = []
+    if ideal_localization:
+        truth_topic = f"{namespace}/ground_truth/odom"
+        message_family = "gz" if variant["name"] == "gz" else "ignition"
+        localization_nodes = [
+            Node(
+                package="ros_gz_bridge",
+                executable="parameter_bridge",
+                name="ground_truth_bridge",
+                namespace=namespace,
+                arguments=[
+                    f"{truth_topic}@nav_msgs/msg/Odometry[{message_family}.msgs.Odometry"
+                ],
+                parameters=[{"use_sim_time": True}],
+                output="screen",
+            ),
+            Node(
+                package=PACKAGE_NAME,
+                executable="ground_truth_localization.py",
+                namespace=namespace,
+                parameters=[
+                    {
+                        "use_sim_time": True,
+                        "map_frame": LaunchConfiguration("map_frame").perform(context),
+                        "odom_frame": configuration["control"]["odom_frame"]
+                        or prefix + "odom",
+                        "body_frame": body_frame,
+                        "odom_topic": configuration["control"]["odom_topic"],
+                    }
+                ],
+                output="screen",
+            ),
+        ]
     return [
+        *localization_nodes,
         cleanup_handler,
         controller_exit_handler,
         spawn_handler,
@@ -306,7 +355,7 @@ def generate_spawn_launch_description(variant):
     declare_publish_ground_truth = DeclareLaunchArgument(
         "publish_ground_truth",
         default_value="false",
-        description="Publish Gazebo-only ground truth for validation; never bridged to ROS",
+        description="Publish Gazebo ground truth; ROS bridge enabled only for ideal localization",
     )
     declare_x = DeclareLaunchArgument(
         "x",
@@ -352,6 +401,20 @@ def generate_spawn_launch_description(variant):
     launch_description.add_action(declare_robot_name)
     launch_description.add_action(declare_world_name)
     launch_description.add_action(declare_publish_ground_truth)
+    launch_description.add_action(
+        DeclareLaunchArgument(
+            "publish_ground_truth_map_tf",
+            default_value="false",
+            description="SIMULATION ONLY: publish ideal map->odom from timestamp-aligned truth and wheel odom",
+        )
+    )
+    launch_description.add_action(
+        DeclareLaunchArgument(
+            "map_frame",
+            default_value="map",
+            description="Ideal localization map frame, aligned with the Gazebo truth reference",
+        )
+    )
     launch_description.add_action(declare_x)
     launch_description.add_action(declare_y)
     launch_description.add_action(declare_z)
@@ -407,6 +470,10 @@ def demo_setup(context, variant):
             "publish_ground_truth": LaunchConfiguration("publish_ground_truth").perform(
                 context
             ),
+            "publish_ground_truth_map_tf": LaunchConfiguration(
+                "publish_ground_truth_map_tf"
+            ).perform(context),
+            "map_frame": LaunchConfiguration("map_frame").perform(context),
             "x": LaunchConfiguration("x").perform(context),
             "y": LaunchConfiguration("y").perform(context),
             "z": LaunchConfiguration("z").perform(context),
@@ -461,7 +528,7 @@ def generate_demo_launch_description(variant):
     declare_publish_ground_truth = DeclareLaunchArgument(
         "publish_ground_truth",
         default_value="false",
-        description="Publish Gazebo-only ground truth for validation; never bridged to ROS",
+        description="Publish Gazebo ground truth; ROS bridge enabled only for ideal localization",
     )
     declare_x = DeclareLaunchArgument(
         "x",
@@ -509,6 +576,20 @@ def generate_demo_launch_description(variant):
     launch_description.add_action(declare_robot_name)
     launch_description.add_action(declare_world_name)
     launch_description.add_action(declare_publish_ground_truth)
+    launch_description.add_action(
+        DeclareLaunchArgument(
+            "publish_ground_truth_map_tf",
+            default_value="false",
+            description="SIMULATION ONLY: publish ideal map->odom from timestamp-aligned truth and wheel odom",
+        )
+    )
+    launch_description.add_action(
+        DeclareLaunchArgument(
+            "map_frame",
+            default_value="map",
+            description="Ideal localization map frame, aligned with the Gazebo truth reference",
+        )
+    )
     launch_description.add_action(declare_x)
     launch_description.add_action(declare_y)
     launch_description.add_action(declare_z)

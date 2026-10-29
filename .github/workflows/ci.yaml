@@ -35,7 +35,7 @@ jobs:
           cmake --build build-core -j2
           ctest --test-dir build-core --output-on-failure
       - name: Run portable model tests
-        run: PYTHONPATH=swerve_gazebo_sim pytest -q swerve_gazebo_sim/test/test_model.py swerve_gazebo_sim/test/test_truth.py
+        run: PYTHONPATH=swerve_gazebo_sim pytest -q swerve_gazebo_sim/test/test_model.py swerve_gazebo_sim/test/test_truth.py swerve_gazebo_sim/test/test_localization.py
 
   simulation:
     name: ${{ matrix.ros }} / ${{ matrix.gazebo }}
