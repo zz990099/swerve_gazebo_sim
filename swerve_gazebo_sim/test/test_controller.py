@@ -67,13 +67,14 @@ def test_controller_watchdogs_and_feedback():
         clk = Clock()
         clk.clock.sec = int(sim[0])
         clk.clock.nanosec = int((sim[0] % 1) * 1e9)
+        clock_ns = stamp_ns(clk.clock)
         clock.publish(clk)
         # Allow /clock to reach the controller before stamped input.
         rclpy.spin_once(node, timeout_sec=0.005)
         time.sleep(0.005)
         if command_offset_ms:
             deadline = time.monotonic() + 0.18
-            while not states or stamp_ns(states[-1].header.stamp) != stamp_ns(clk.clock):
+            while not states or stamp_ns(states[-1].header.stamp) != clock_ns:
                 assert time.monotonic() < deadline, "Controller did not receive /clock"
                 rclpy.spin_once(node, timeout_sec=0.01)
         if send_feedback:
@@ -88,7 +89,7 @@ def test_controller_watchdogs_and_feedback():
         if velocity is not None:
             msg = TwistStamped()
             sec, nanosec = divmod(
-                stamp_ns(clk.clock) + command_offset_ms * 1_000_000, 1_000_000_000
+                clock_ns + command_offset_ms * 1_000_000, 1_000_000_000
             )
             msg.header.stamp = Time(sec=sec, nanosec=nanosec)
             msg.header.frame_id = "base_footprint"
