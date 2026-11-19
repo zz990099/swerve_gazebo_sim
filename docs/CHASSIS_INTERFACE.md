@@ -18,8 +18,10 @@ are errors. Stamped commands require a nonnegative, strictly increasing timestam
 no older than `cmd_timeout` and no more than `cmd_future_tolerance` seconds in the
 future. The node defaults to 0.01 s and the bundled Gazebo configuration uses
 0.03 s. Commands time out after `wall_timeout` even if simulation time is paused.
-Feedback similarly
-requires fresh source and receive times within `feedback_timeout`. Fresh zero
+Feedback uses its own `feedback_future_tolerance`, also 0.01 s by default and
+0.03 s in the bundled Gazebo configuration. Feedback source and receipt age
+must stay within `feedback_timeout` (0.25 s by default). Both source timestamp
+checks use integer nanoseconds. Fresh zero
 commands recover a latched fault only after the measured drive wheels stop.
 
 The state publication header is current ROS time. `feedback_stamp` identifies the

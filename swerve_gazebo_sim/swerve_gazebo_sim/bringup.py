@@ -54,6 +54,7 @@ OBSERVER_DEFAULTS = {
     "pose_variance": 0.02,
     "twist_variance": 0.02,
     "feedback_timeout": 0.25,
+    "feedback_future_tolerance": 0.01,
 }
 CONTROL = CHASSIS_PARAMETERS + tuple(OBSERVER_DEFAULTS)
 
@@ -160,6 +161,9 @@ def load_config(path):
     if isinstance(cfg["control"], dict):
         cfg["control"].setdefault(
             "cmd_future_tolerance", CHASSIS_DEFAULTS["cmd_future_tolerance"]
+        )
+        cfg["control"].setdefault(
+            "feedback_future_tolerance", OBSERVER_DEFAULTS["feedback_future_tolerance"]
         )
     for section, keys in (("geometry", GEOMETRY), ("control", CONTROL)):
         if not isinstance(cfg[section], dict) or set(cfg[section]) != set(keys):

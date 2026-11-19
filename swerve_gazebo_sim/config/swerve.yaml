@@ -18,6 +18,7 @@ control:
   cmd_future_tolerance: 0.03
   wall_timeout: 0.5
   feedback_timeout: 0.25
+  feedback_future_tolerance: 0.03
   max_wheel_speed: 20.0
   max_wheel_acceleration: 40.0
   max_steering_rate: 2.5

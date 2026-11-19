@@ -28,6 +28,8 @@ def test_controller_watchdogs_and_feedback():
             "use_sim_time:=true",
             "-p",
             "cmd_future_tolerance:=0.03",
+            "-p",
+            "feedback_future_tolerance:=0.03",
             "-r",
             "__ns:=/controller_test",
         ]
@@ -61,7 +63,13 @@ def test_controller_watchdogs_and_feedback():
     def stamp_ns(stamp):
         return stamp.sec * 1_000_000_000 + stamp.nanosec
 
-    def step(velocity=(0, 0, 0), advance=True, send_feedback=True, command_offset_ms=0):
+    def step(
+        velocity=(0, 0, 0),
+        advance=True,
+        send_feedback=True,
+        command_offset_ms=0,
+        feedback_offset_ms=0,
+    ):
         if advance:
             sim[0] += 0.02
         clk = Clock()
@@ -72,14 +80,17 @@ def test_controller_watchdogs_and_feedback():
         # Allow /clock to reach the controller before stamped input.
         rclpy.spin_once(node, timeout_sec=0.005)
         time.sleep(0.005)
-        if command_offset_ms:
+        if command_offset_ms or feedback_offset_ms:
             deadline = time.monotonic() + 0.18
             while not states or stamp_ns(states[-1].header.stamp) != clock_ns:
                 assert time.monotonic() < deadline, "Controller did not receive /clock"
                 rclpy.spin_once(node, timeout_sec=0.01)
         if send_feedback:
             j = JointState()
-            j.header.stamp = clk.clock
+            sec, nanosec = divmod(
+                clock_ns + feedback_offset_ms * 1_000_000, 1_000_000_000
+            )
+            j.header.stamp = Time(sec=sec, nanosec=nanosec)
             j.name = [f"{c}_steering_joint" for c in ("fl", "fr", "rl", "rr")] + [
                 f"{c}_wheel_joint" for c in ("fl", "fr", "rl", "rr")
             ]
@@ -111,6 +122,18 @@ def test_controller_watchdogs_and_feedback():
         raise AssertionError(states[-1] if states else "No state")
 
     try:
+        until(lambda s: s.fault == 0 and s.feedback_valid)
+        for offset in (15, 30):
+            until(
+                lambda s: s.fault == 0
+                and s.feedback_valid
+                and stamp_ns(s.feedback_stamp) - stamp_ns(s.header.stamp)
+                == offset * 1_000_000,
+                feedback_offset_ms=offset,
+            )
+        last_feedback = stamp_ns(states[-1].feedback_stamp)
+        until(lambda s: s.fault == 2, velocity=None, feedback_offset_ms=31)
+        assert stamp_ns(states[-1].feedback_stamp) == last_feedback
         until(lambda s: s.fault == 0 and s.feedback_valid)
         for offset in (15, 25):
             until(

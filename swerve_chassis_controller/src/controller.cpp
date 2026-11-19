@@ -3,6 +3,7 @@
 #include <chrono>
 #include <cmath>
 #include <csignal>
+#include <cstdint>
 #include <memory>
 #include <string>
 #include <thread>
@@ -38,10 +39,11 @@ class Controller : public rclcpp::Node
     l_.tracking_tolerance = positive("steering_tracking_tolerance", 0.05);
     l_.stopped_speed = positive("stopped_wheel_speed", 0.05);
     generator_ = std::make_unique<core::Generator>(g_, l_);
-    cmd_timeout_ = positive("cmd_timeout", 0.5);
-    cmd_future_tolerance_ = positive("cmd_future_tolerance", 0.01);
+    cmd_timeout_ = duration_ns("cmd_timeout", 0.5);
+    cmd_future_tolerance_ = duration_ns("cmd_future_tolerance", 0.01);
     wall_timeout_ = positive("wall_timeout", 0.5);
-    feedback_timeout_ = positive("feedback_timeout", 0.25);
+    feedback_timeout_ = duration_ns("feedback_timeout", 0.25);
+    feedback_future_tolerance_ = duration_ns("feedback_future_tolerance", 0.01);
     double hz = positive("update_rate", 100);
     if (hz != 100) {
       throw std::invalid_argument("Requires 100 Hz control");
@@ -86,16 +88,17 @@ class Controller : public rclcpp::Node
     if (input == "stamped") {
       command_sub_ = create_subscription<geometry_msgs::msg::TwistStamped>(
           "cmd_vel", 1, [this](geometry_msgs::msg::TwistStamped::ConstSharedPtr msg) {
-            const double t = stamp(msg->header.stamp);
+            const auto t = stamp_ns(msg->header.stamp);
             observe_clock();
-            const double received = now().seconds();
+            const auto received = now().nanoseconds();
             if (msg->header.frame_id != body_frame_ || !valid_stamp(msg->header.stamp) ||
-                !command_time_valid(t, received) ||
+                !time_valid(t, received, cmd_future_tolerance_, cmd_timeout_) ||
                 (have_command_ && t <= command_stamp_)) {
               if (!fault_) {
                 RCLCPP_WARN(
                     get_logger(), "Rejected cmd_vel: frame=%s stamp=%.9f now=%.9f last=%.9f",
-                    msg->header.frame_id.c_str(), t, received, command_stamp_);
+                    msg->header.frame_id.c_str(), seconds(t), seconds(received),
+                    seconds(command_stamp_));
               }
               stop(1);
               return;
@@ -106,7 +109,7 @@ class Controller : public rclcpp::Node
       legacy_sub_ = create_subscription<geometry_msgs::msg::Twist>(
           "cmd_vel", 1, [this](geometry_msgs::msg::Twist::ConstSharedPtr msg) {
             observe_clock();
-            command(*msg, now().seconds());
+            command(*msg, now().nanoseconds());
           });
     } else {
       throw std::invalid_argument("command_type must be stamped or unstamped");
@@ -139,9 +142,22 @@ class Controller : public rclcpp::Node
     }
     return v;
   }
-  static double stamp(const builtin_interfaces::msg::Time & t)
+  std::int64_t duration_ns(const std::string & name, double value)
   {
-    return t.sec + t.nanosec * 1e-9;
+    const auto duration = positive(name, value);
+    if (duration >= std::chrono::duration<double>(std::chrono::nanoseconds::max()).count()) {
+      throw std::invalid_argument(name + " exceeds the nanosecond duration range");
+    }
+    return std::chrono::round<std::chrono::nanoseconds>(
+               std::chrono::duration<double>(duration)).count();
+  }
+  static std::int64_t stamp_ns(const builtin_interfaces::msg::Time & t)
+  {
+    return std::int64_t{t.sec} * 1'000'000'000 + t.nanosec;
+  }
+  static double seconds(std::int64_t ns)
+  {
+    return std::chrono::duration<double>(std::chrono::nanoseconds(ns)).count();
   }
   static bool valid_stamp(const builtin_interfaces::msg::Time & t)
   {
@@ -184,20 +200,24 @@ class Controller : public rclcpp::Node
   }
   bool feedback_fresh() const
   {
-    return have_feedback_ && now().seconds() >= feedback_stamp_ - 0.01 &&
-           now().seconds() - feedback_stamp_ <= feedback_timeout_ &&
-           age(feedback_wall_) <= feedback_timeout_;
+    return have_feedback_ &&
+           time_valid(feedback_stamp_, now().nanoseconds(), feedback_future_tolerance_,
+                      feedback_timeout_) &&
+           Steady::now() - feedback_wall_ <= std::chrono::nanoseconds(feedback_timeout_);
   }
-  bool command_time_valid(double stamp, double now) const
+  static bool time_valid(
+      std::int64_t stamp, std::int64_t now, std::int64_t future, std::int64_t timeout)
   {
-    return stamp <= now + cmd_future_tolerance_ && now - stamp <= cmd_timeout_;
+    const auto age = now - stamp;
+    return age >= -future && age <= timeout;
   }
   bool command_fresh() const
   {
-    return have_command_ && command_time_valid(command_stamp_, now().seconds()) &&
+    return have_command_ &&
+           time_valid(command_stamp_, now().nanoseconds(), cmd_future_tolerance_, cmd_timeout_) &&
            age(command_wall_) <= wall_timeout_;
   }
-  void command(const geometry_msgs::msg::Twist & msg, double t)
+  void command(const geometry_msgs::msg::Twist & msg, std::int64_t t)
   {
     core::Twist value{msg.linear.x, msg.linear.y, msg.angular.z};
     if (!core::finite(value) || msg.linear.z != 0 || msg.angular.x != 0 || msg.angular.y != 0) {
@@ -231,9 +251,9 @@ class Controller : public rclcpp::Node
   void feedback(const sensor_msgs::msg::JointState & msg)
   {
     observe_clock();
-    const double t = stamp(msg.header.stamp);
-    if (!valid_stamp(msg.header.stamp) || t > now().seconds() + 0.01 ||
-        now().seconds() - t > feedback_timeout_) {
+    const auto t = stamp_ns(msg.header.stamp);
+    if (!valid_stamp(msg.header.stamp) ||
+        !time_valid(t, now().nanoseconds(), feedback_future_tolerance_, feedback_timeout_)) {
       stop(2);
       return;
     }
@@ -271,7 +291,7 @@ class Controller : public rclcpp::Node
     measured_ = next;
     const auto velocity = core::forward(g_, measured_);
     if (have_odom_ && t - feedback_stamp_ <= feedback_timeout_) {
-      pose_ = core::integrate(pose_, velocity, t - feedback_stamp_);
+      pose_ = core::integrate(pose_, velocity, seconds(t - feedback_stamp_));
     }
     feedback_stamp_ = t;
     feedback_time_ = msg.header.stamp;
@@ -341,7 +361,7 @@ class Controller : public rclcpp::Node
     msg.header.stamp = now();
     msg.header.frame_id = body_frame_;
     msg.feedback_stamp = feedback_time_;
-    msg.command_stamp = rclcpp::Time(static_cast<int64_t>(command_stamp_ * 1e9));
+    msg.command_stamp = rclcpp::Time(command_stamp_);
     msg.command_sequence = sequence_;
     msg.steering_angles = measured_.steering;
     msg.wheel_speeds = measured_.speed;
@@ -374,9 +394,11 @@ class Controller : public rclcpp::Node
   uint8_t fault_{2};
   uint64_t sequence_{0};
   bool have_command_{false}, have_feedback_{false}, have_odom_{false};
-  double cmd_timeout_{}, wall_timeout_{}, feedback_timeout_{}, pose_variance_{}, twist_variance_{};
-  double cmd_future_tolerance_{};
-  double command_stamp_{}, feedback_stamp_{}, last_tick_{}, last_clock_{};
+  double wall_timeout_{}, pose_variance_{}, twist_variance_{};
+  double last_tick_{}, last_clock_{};
+  std::int64_t cmd_timeout_{}, feedback_timeout_{};
+  std::int64_t cmd_future_tolerance_{}, feedback_future_tolerance_{};
+  std::int64_t command_stamp_{}, feedback_stamp_{};
   Steady::time_point command_wall_{}, feedback_wall_{};
   builtin_interfaces::msg::Time feedback_time_;
   std::string body_frame_, odom_frame_, child_frame_;
