@@ -29,6 +29,7 @@ CHASSIS_DEFAULTS = {
     "max_steering_rate": 2.5,
     "stopped_wheel_speed": 0.05,
     "cmd_timeout": 0.5,
+    "cmd_future_tolerance": 0.01,
     "wall_timeout": 0.5,
     "update_rate": 100.0,
     "max_linear_speed": 0.8,
@@ -156,6 +157,10 @@ def load_config(path):
         cfg = yaml.load(stream, Loader=UniqueLoader)
     if not isinstance(cfg, dict) or set(cfg) != {"geometry", "control"}:
         raise ValueError("Expected exactly geometry and control")
+    if isinstance(cfg["control"], dict):
+        cfg["control"].setdefault(
+            "cmd_future_tolerance", CHASSIS_DEFAULTS["cmd_future_tolerance"]
+        )
     for section, keys in (("geometry", GEOMETRY), ("control", CONTROL)):
         if not isinstance(cfg[section], dict) or set(cfg[section]) != set(keys):
             raise ValueError(f"{section} must contain exactly {keys}")

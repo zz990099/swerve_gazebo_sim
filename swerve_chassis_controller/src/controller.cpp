@@ -39,6 +39,7 @@ class Controller : public rclcpp::Node
     l_.stopped_speed = positive("stopped_wheel_speed", 0.05);
     generator_ = std::make_unique<core::Generator>(g_, l_);
     cmd_timeout_ = positive("cmd_timeout", 0.5);
+    cmd_future_tolerance_ = positive("cmd_future_tolerance", 0.01);
     wall_timeout_ = positive("wall_timeout", 0.5);
     feedback_timeout_ = positive("feedback_timeout", 0.25);
     double hz = positive("update_rate", 100);
@@ -87,9 +88,15 @@ class Controller : public rclcpp::Node
           "cmd_vel", 1, [this](geometry_msgs::msg::TwistStamped::ConstSharedPtr msg) {
             const double t = stamp(msg->header.stamp);
             observe_clock();
+            const double received = now().seconds();
             if (msg->header.frame_id != body_frame_ || !valid_stamp(msg->header.stamp) ||
-                t > now().seconds() + 0.01 || now().seconds() - t > cmd_timeout_ ||
+                !command_time_valid(t, received) ||
                 (have_command_ && t <= command_stamp_)) {
+              if (!fault_) {
+                RCLCPP_WARN(
+                    get_logger(), "Rejected cmd_vel: frame=%s stamp=%.9f now=%.9f last=%.9f",
+                    msg->header.frame_id.c_str(), t, received, command_stamp_);
+              }
               stop(1);
               return;
             }
@@ -181,10 +188,14 @@ class Controller : public rclcpp::Node
            now().seconds() - feedback_stamp_ <= feedback_timeout_ &&
            age(feedback_wall_) <= feedback_timeout_;
   }
+  bool command_time_valid(double stamp, double now) const
+  {
+    return stamp <= now + cmd_future_tolerance_ && now - stamp <= cmd_timeout_;
+  }
   bool command_fresh() const
   {
-    return have_command_ && now().seconds() >= command_stamp_ - 0.01 &&
-           now().seconds() - command_stamp_ <= cmd_timeout_ && age(command_wall_) <= wall_timeout_;
+    return have_command_ && command_time_valid(command_stamp_, now().seconds()) &&
+           age(command_wall_) <= wall_timeout_;
   }
   void command(const geometry_msgs::msg::Twist & msg, double t)
   {
@@ -364,6 +375,7 @@ class Controller : public rclcpp::Node
   uint64_t sequence_{0};
   bool have_command_{false}, have_feedback_{false}, have_odom_{false};
   double cmd_timeout_{}, wall_timeout_{}, feedback_timeout_{}, pose_variance_{}, twist_variance_{};
+  double cmd_future_tolerance_{};
   double command_stamp_{}, feedback_stamp_{}, last_tick_{}, last_clock_{};
   Steady::time_point command_wall_{}, feedback_wall_{};
   builtin_interfaces::msg::Time feedback_time_;

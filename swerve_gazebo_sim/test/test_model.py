@@ -233,6 +233,14 @@ def test_invalid_namespace():
         names("bad-name", "swerve", "auto")
 
 
+def test_command_future_tolerance_in_sim_and_existing_configs(tmp_path):
+    cfg = load_config(ROOT / "config/swerve.yaml")
+    assert cfg["control"].pop("cmd_future_tolerance") == 0.03
+    path = tmp_path / "existing.yaml"
+    path.write_text(yaml.safe_dump(cfg))
+    assert load_config(path)["control"]["cmd_future_tolerance"] == 0.01
+
+
 @pytest.mark.parametrize("change", ["missing", "unknown", "duplicate", "negative"])
 def test_reject_noncurrent_configuration(tmp_path, change):
     cfg = load_config(ROOT / "config/swerve.yaml")

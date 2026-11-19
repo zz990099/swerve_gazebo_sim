@@ -15,8 +15,10 @@ prefixed with `frame_prefix`; input is in the body frame, no TF conversion occur
 
 Only linear.x, linear.y and angular.z may be nonzero. NaN/Inf and other axes
 are errors. Stamped commands require a nonnegative, strictly increasing timestamp
-no older than `cmd_timeout` and no more than 0.01 s in the future. Commands time
-out after `wall_timeout` even if simulation time is paused. Feedback similarly
+no older than `cmd_timeout` and no more than `cmd_future_tolerance` seconds in the
+future. The node defaults to 0.01 s and the bundled Gazebo configuration uses
+0.03 s. Commands time out after `wall_timeout` even if simulation time is paused.
+Feedback similarly
 requires fresh source and receive times within `feedback_timeout`. Fresh zero
 commands recover a latched fault only after the measured drive wheels stop.
 
